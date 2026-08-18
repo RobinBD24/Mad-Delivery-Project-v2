@@ -98,8 +98,11 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={`${bengali.variable} ${inter.variable} ${barlow.variable} ${sora.variable} ${jetbrains.variable} h-full antialiased`}
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      <head suppressHydrationWarning>
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+        />
       </head>
       <body className="flex min-h-full flex-col font-sans">
         <ThemeProvider initialPreference={themePreference}>
