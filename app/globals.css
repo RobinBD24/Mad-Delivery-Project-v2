@@ -1,0 +1,539 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────
+   Appearance (light / dark)
+
+   The theme is driven by <html data-theme>, written pre-paint by the inline
+   script in the root layout (see lib/theme/bootstrap.ts). This variant makes
+   every Tailwind `dark:` utility follow that attribute instead of Tailwind's
+   default `prefers-color-scheme` media query — so an explicit user choice wins
+   over the OS setting.
+   ───────────────────────────────────────────────────────────── */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Semantic neutrals. Only these flip between themes — brand red, rider green
+   and branch-manager flame stay fixed so each role keeps its identity. */
+:root {
+  --surface-page: #f4f6fb; /* app background */
+  --surface-card: #ffffff; /* cards, topbar, menus, modals */
+  --surface-muted: #f8fafc; /* table headers, hover rows, empty states */
+  --surface-hover: #f1f5f9; /* interactive hover */
+  --border-base: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --fg-base: #1f2937; /* primary text */
+  --fg-muted: #64748b; /* secondary text */
+  --fg-subtle: #94a3b8; /* icons, placeholders */
+  --dashboard-content-max: 1680px;
+  --dashboard-section-gap: 1.125rem;
+  --dashboard-control-height: 2.5rem;
+  --dashboard-touch-height: 2.75rem;
+  --dashboard-rider-action-height: 3rem;
+  --dashboard-radius-panel: 1rem;
+  --dashboard-radius-control: 0.75rem;
+  --dashboard-shadow-panel: 0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px rgb(15 23 42 / 0.04);
+
+  /* Sidebar is its own surface (see static_design/Branch-manager_dashboard.html).
+     The mockup is dark-only; in light mode we keep the established MAD navy so
+     the shell still reads as MAD Delivery rather than a grey slab. */
+  --surface-sidebar: #16213e;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-fg: #ffffff;
+  --sidebar-fg-dim: rgba(255, 255, 255, 0.72);
+  --sidebar-fg-faint: rgba(255, 255, 255, 0.45);
+  --sidebar-hover: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] {
+  --surface-page: #0a0c10; /* mockup --bg */
+  --surface-card: #13161d; /* mockup --card */
+  --surface-muted: #171b24; /* mockup --card-2 */
+  --surface-hover: #1d222c;
+  --border-base: #22262f; /* mockup --border */
+  --border-strong: #333947;
+  --fg-base: #eef0f5; /* mockup --text */
+  --fg-muted: #9aa1b3; /* mockup --text-dim */
+  --fg-subtle: #5c6375; /* mockup --text-faint */
+
+  --surface-sidebar: #0c0e13; /* mockup --sidebar */
+  --sidebar-border: #1b1f27; /* mockup --border-soft */
+  --sidebar-fg: #eef0f5;
+  --sidebar-fg-dim: #9aa1b3;
+  --sidebar-fg-faint: #5c6375;
+  --sidebar-hover: #171b24;
+  --dashboard-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.24), 0 18px 40px rgb(0 0 0 / 0.12);
+}
+
+/* `inline` keeps the var reference live, so bg-surface-card re-resolves when
+   data-theme changes instead of baking in the light value at build time. */
+@theme inline {
+  --color-surface-page: var(--surface-page);
+  --color-surface-card: var(--surface-card);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-hover: var(--surface-hover);
+  --color-border-base: var(--border-base);
+  --color-border-strong: var(--border-strong);
+  --color-fg-base: var(--fg-base);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+
+  --color-surface-sidebar: var(--surface-sidebar);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-fg: var(--sidebar-fg);
+  --color-sidebar-fg-dim: var(--sidebar-fg-dim);
+  --color-sidebar-fg-faint: var(--sidebar-fg-faint);
+  --color-sidebar-hover: var(--sidebar-hover);
+}
+
+@theme {
+  /* Brand — homepage red (#e8192c) is the single main brand color site-wide */
+  --color-brand-50: #fef2f3;
+  --color-brand-100: #fde0e2;
+  --color-brand-200: #fbc4c8;
+  --color-brand-300: #f79aa1;
+  --color-brand-400: #f16571;
+  --color-brand-500: #e8192c;
+  --color-brand-600: #cf1526;
+  --color-brand-700: #b01020;
+  --color-brand-900: #7a0d18;
+
+  /* Sidebar / ink (navy base shell) — bottom stop stays blue to match old */
+  --color-ink-800: #1e2a4a;
+  --color-ink-900: #16213e;
+  --color-ink-950: #0f3460;
+
+  /* Rider green app theme */
+  --color-rider-50: #f0fdf4;
+  --color-rider-500: #22c55e;
+  --color-rider-600: #16a34a;
+  --color-rider-700: #166534;
+
+  /* Branch-manager dark/orange theme */
+  --color-flame-500: #ff6a2b;
+
+  /* Homepage accents */
+  --color-cheez-gold: #f5a623;
+  --color-surface-dark: #1c1c24;
+
+  --font-sans: var(--font-bengali), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), "Barlow Condensed", ui-sans-serif, sans-serif;
+  /* Dashboard design faces: Sora for headings/KPI values, JetBrains Mono for
+     tabular numbers (static_design/Branch-manager_dashboard.html). Bengali
+     first so BN copy never falls back to a Latin-only face. */
+  --font-heading: var(--font-bengali), var(--font-sora), "Sora", ui-sans-serif, sans-serif;
+  --font-mono: var(--font-bengali), var(--font-jetbrains), "JetBrains Mono", ui-monospace, monospace;
+
+  --shadow-card: 0 2px 8px rgb(16 24 40 / 0.06);
+  --shadow-card-hover: 0 8px 20px rgb(16 24 40 / 0.1);
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--fg-base);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dashboard-content-inner {
+  display: flex;
+  width: 100%;
+  max-width: var(--dashboard-content-max);
+  min-width: 0;
+  margin-inline: auto;
+  flex-direction: column;
+  gap: var(--dashboard-section-gap);
+  padding: 1rem 0.875rem 1.875rem;
+}
+
+@media (min-width: 640px) {
+  .dashboard-content-inner {
+    padding: 1.125rem 1.625rem 2.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    transition: none;
+  }
+}
+
+::selection {
+  background: var(--color-brand-100);
+  color: #7a0d18;
+}
+
+/* Let the browser paint native widgets (scrollbars, form controls, spellcheck)
+   to match the active theme. */
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Thin scrollbars for tables and the sidebar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Dashboard shell — ported from static_design/Branch-manager_dashboard.html.
+   Only the parts Tailwind utilities can't express live here; the accent color
+   is passed per-instance as --c so a KPI card can carry its own tone.
+   ───────────────────────────────────────────────────────────── */
+
+/* .kpi-card::before in the mockup — 3px accent rail across the card top. */
+.kpi-accent {
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-accent::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--c, var(--color-brand-500));
+}
+
+/* .chip in the mockup — 3px accent rail down the leading edge. */
+.chip-accent {
+  border-inline-start: 3px solid var(--c, var(--color-brand-500));
+}
+
+/* PHASE 8 — the gliding 'route-rider' header animation was removed as an
+   unwanted moving icon; its keyframes/class are deleted with it. */
+
+/* .icon-wrap / .kpi-icon — accent tint behind the icon. */
+.accent-tint {
+  background: color-mix(in srgb, var(--c, var(--color-brand-500)) 16%, transparent);
+  color: var(--c, var(--color-brand-500));
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Homepage layout — ported verbatim from the original index.html
+   (container 1200px, product grid, hero grid, footer grid).
+   Scoped so it never leaks into the dashboards.
+   ───────────────────────────────────────────────────────────── */
+.home-container {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 60px;
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+
+.item-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 40px;
+}
+
+@media (max-width: 860px) {
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+}
+
+@media (max-width: 640px) {
+  .item-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .item-cards-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+/* Hero background — radial glows + faint 48px grid (from index.html) */
+.hero-bg {
+  background:
+    radial-gradient(ellipse 60% 60% at 80% 40%, rgba(232, 25, 44, 0.12) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 50% at 10% 70%, rgba(245, 166, 35, 0.06) 0%, transparent 60%),
+    linear-gradient(170deg, #0c0c0e 0%, #13131a 100%);
+}
+.grid-overlay {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.grid-overlay-cta {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Homepage entrance / feedback animations (from index.html) */
+@keyframes home-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes home-fade-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes home-fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes home-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+@keyframes home-toast-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 8px) scale(0.96);
+  }
+}
+@keyframes home-status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@keyframes home-cart-bounce {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.22);
+  }
+  55% {
+    transform: scale(0.93);
+  }
+  75% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-fade-up {
+  animation: home-fade-up 0.55s ease both;
+}
+.animate-fade-right {
+  animation: home-fade-right 0.6s ease both;
+}
+.animate-fade-slide-in {
+  animation: home-fade-slide-in 0.2s ease both;
+}
+.animate-cart-bounce {
+  animation: home-cart-bounce 0.45s ease;
+}
+.animate-status-pulse {
+  animation: home-status-pulse 2s ease-in-out infinite;
+}
+@keyframes home-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-modal-in {
+  animation: home-modal-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.home-toast {
+  animation: home-toast-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.home-toast-leaving {
+  animation: home-toast-out 0.3s ease forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-fade-right,
+  .animate-fade-slide-in,
+  .animate-modal-in,
+  .animate-cart-bounce,
+  .animate-status-pulse,
+  .home-toast,
+  .home-toast-leaving,
+  .topbar-pulse::before {
+    animation: none !important;
+  }
+}
+
+/* Homepage top strip pulse dot (ported from original index.html) */
+@keyframes topbar-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.topbar-pulse::before {
+  content: "";
+  display: inline-block;
+  vertical-align: middle;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  margin-right: 7px;
+  animation: topbar-blink 1.2s ease-in-out infinite;
+}
+
+@media (max-width: 480px) {
+  .topbar-sep,
+  .topbar-brand-txt {
+    display: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Compact internal-page density.
+
+   Opt-in via <DashboardPage density="compact">. Authenticated LIST pages use
+   it so more records fit on screen; the seven dashboard home pages do not pass
+   it, so their sizing is untouched. Sizes stay inside the readable range —
+   nothing here shrinks a touch target below 40px.
+   ───────────────────────────────────────────────────────────── */
+[data-density="compact"] h1 {
+  font-size: 1.5rem;   /* 24px */
+  line-height: 1.2;
+}
+@media (min-width: 640px) {
+  [data-density="compact"] h1 {
+    font-size: 1.625rem; /* 26px */
+  }
+}
+
+[data-density="compact"] [data-testid="summary-card"] {
+  min-height: 6.5rem;
+  padding: 0.875rem;
+}
+[data-density="compact"] [data-summary-value] {
+  padding-top: 0.5rem;
+  font-size: 1.5rem;   /* 24px */
+}
+@media (min-width: 640px) {
+  [data-density="compact"] [data-summary-value] {
+    font-size: 1.625rem;
+  }
+}
+
+/* Denser rows: the same readable type, less vertical air. */
+[data-density="compact"] table th {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+}
+[data-density="compact"] table td {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+/* ── Native <select> dropdown arrow ──────────────────────────────────────────
+   Every select in the app carries `appearance-none` (via SELECT_EXTRA_CLASS)
+   so its option list can be forced onto the theme surface — which also removed
+   the browser's own arrow, leaving every dropdown looking like a plain text
+   input. This draws one back.
+
+   A background-image rather than a wrapper element: many selects are rendered
+   by Server Components as a bare `<select>` with no parent to hang a decorative
+   icon on, and a background is inert by definition (no pointer target, nothing
+   focusable, invisible to screen readers) without needing pointer-events or
+   aria-hidden. `appearance-none` stays, so there is exactly one arrow.
+
+   The SVG is an inline data URI, so there is no network request. It cannot
+   inherit `currentColor`, so the two themes get their own copy in a token
+   colour: slate-500 on light, slate-400 on dark — both ≥ 4.5:1 against their
+   surface. Right padding lives in SELECT_EXTRA_CLASS (`pr-9`), which already
+   reserves more than the 1rem glyph plus its 0.75rem inset, so a long selected
+   value truncates before it can reach the arrow. */
+.field-select-arrow {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem 1rem;
+}
+
+[data-theme="dark"] .field-select-arrow {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+}
+
+/* Disabled: still unmistakably a dropdown, just muted to match the control. */
+.field-select-arrow:disabled {
+  opacity: 0.55;
+}
+
+/* RTL: the arrow follows the text side. Bangla is left-to-right, so this is a
+   safety net for any future RTL locale rather than a path in use today — the
+   matching padding flip comes from `pr-9`'s logical counterpart below. */
+[dir="rtl"] .field-select-arrow {
+  background-position: left 0.75rem center;
+  padding-right: 0.875rem;
+  padding-left: 2.25rem;
+}

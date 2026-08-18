@@ -1,0 +1,49 @@
+{
+  "name": "mad-delivery-hq",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" next dev --webpack",
+    "build": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" next build --webpack",
+    "start": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" next start",
+    "lint": "eslint",
+    "seed": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" tsx prisma/seed.ts",
+    "images:convert": "node scripts/convert-images-to-webp.mjs",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:reset": "prisma migrate reset",
+    "db:test:deploy": "node scripts/ensure-test-db.mjs && DATABASE_URL=\"file:./test.db\" prisma migrate deploy",
+    "seed:test": "DATABASE_URL=\"file:./test.db?connection_limit=1&socket_timeout=60&pool_timeout=60\" npm run seed",
+    "test:e2e:prepare": "npm run db:test:deploy && npm run seed:test",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report"
+  },
+  "prisma": {
+    "seed": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.3.1",
+    "bcryptjs": "^2.4.3",
+    "next": "16.2.10",
+    "next-auth": "5.0.0-beta.31",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "sharp": "^0.35.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "prisma": "^6.3.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}

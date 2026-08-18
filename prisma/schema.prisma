@@ -1,0 +1,1440 @@
+// MAD Delivery HQ — Prisma schema
+// Dev: SQLite (zero-setup). Production: switch `provider` to "postgresql" and
+// point DATABASE_URL at Postgres — all types below are Postgres-compatible.
+// Enum-like fields are stored as String (SQLite has no enum) and validated in
+// the application layer (see lib/constants/enums + lib/validation).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  username        String    @unique
+  email           String    @unique
+  password        String
+  firstName       String    @default("")
+  lastName        String    @default("")
+  role            String    @default("customer") // super_admin|management|marketing|branch_manager|accounts|rider|customer
+  status          String    @default("pending") // pending|approved|rejected
+  phone           String    @default("")
+  address         String    @default("")
+  dateOfBirth     DateTime?
+  gender          String    @default("") // male|female|other|""
+  profilePhoto    String? // relative path under /uploads
+  isActive        Boolean   @default(true)
+  isStaff         Boolean   @default(false)
+  isSuperuser     Boolean   @default(false)
+  approvedById    Int?
+  approvedBy      User?     @relation("UserApprovals", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedUsers   User[]    @relation("UserApprovals")
+  approvedAt      DateTime?
+  rejectionReason String    @default("")
+  dateJoined      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  managedBranches     Branch[]                  @relation("BranchManager")
+  branchAssignments   BranchManagerAssignment[] @relation("AssignmentManager")
+  assignmentDecisions BranchManagerAssignment[] @relation("AssignmentBy")
+  activityLogs        ManagerActivityLog[]      @relation("ActivityManager")
+  orders              Order[]                   @relation("CustomerOrders")
+  deliveries          Order[]                   @relation("RiderOrders")
+  riderProfile        RiderProfile?
+  dutyLogs            RiderDutyLog[]
+
+  notifications      Notification[]     @relation("NotificationRecipient")
+  authoredNotices    Notice[]           @relation("NoticeAuthor")
+  filedComplaints    Complaint[]        @relation("ComplaintComplainant")
+  assignedComplaints Complaint[]        @relation("ComplaintAssignee")
+  complaintMessages  ComplaintMessage[] @relation("ComplaintMessageSender")
+
+  commissions         RiderCommission[]   @relation("CommissionRider")
+  withdrawals         RiderWithdrawal[]   @relation("WithdrawalRider")
+  withdrawalDecisions RiderWithdrawal[]   @relation("WithdrawalDecidedBy")
+  settingUpdates      SystemSetting[]     @relation("SettingUpdatedBy")
+  financialAuditLogs  FinancialAuditLog[] @relation("FinancialAuditActor")
+
+  notificationsEnabled Boolean                    @default(true)
+  isBlocked            Boolean                    @default(false) // fake-order customers blocked by super admin
+  blockedReason        String                     @default("")
+  // req #21 — customer's latest validated GPS fix (kept SEPARATE from saved
+  // CustomerAddress rows and from immutable order-address snapshots). Used
+  // server-side for nearest-branch / coverage; never overwrites a saved address.
+  currentLat           Decimal?
+  currentLng           Decimal?
+  currentAccuracy      Decimal?
+  locationUpdatedAt    DateTime?
+  processedRefunds     Refund[]                   @relation("RefundProcessor")
+  recordedExpenses     BranchExpense[]            @relation("ExpenseRecorder")
+  generatedSettlements BranchSettlement[]         @relation("SettlementGenerator")
+  adjustments          FinancialAdjustment[]      @relation("AdjustmentCreator")
+  campaigns            Campaign[]                 @relation("CampaignCreator")
+  coupons              Coupon[]                   @relation("CouponCreator")
+  segments             AudienceSegment[]          @relation("SegmentCreator")
+  staffAttendance      StaffAttendance[]          @relation("AttendanceStaff")
+  tableReservations    TableReservation[]         @relation("ReservationCustomer")
+  reservationMessages  ReservationMessage[]       @relation("ReservationMessageSender")
+  ramadanBookings      RamadanBooking[]           @relation("RamadanBookingCustomer")
+  loginHistory         LoginHistory[]             @relation("LoginUser")
+  routePoints          RiderRoutePoint[]          @relation("RoutePointRider")
+  addresses            CustomerAddress[]          @relation("AddressOwner")
+  rewardLedger         RewardLedger[]             @relation("RewardOwner")
+  riderReviewsGiven    RiderReview[]              @relation("RiderReviewCustomer")
+  riderReviewsReceived RiderReview[]              @relation("RiderReviewRider")
+  foodReviews          FoodReview[]               @relation("FoodReviewCustomer")
+  recordedAttendance   EmployeeAttendance[]       @relation("AttendanceRecorder")
+  orderAssignments     RiderOrderAssignment[]     @relation("AssignmentRider")
+  dutySessions         RiderBranchDutySession[]   @relation("RiderDutySessions")
+  receiveConfirmations OrderReceiveConfirmation[] @relation("ReceiveConfirmRider")
+  dutyChatMessages     RiderDutyChatMessage[]     @relation("DutyChatSender")
+  deliveryChatMessages OrderDeliveryChatMessage[] @relation("DeliveryChatSender")
+  ramadanReservations  RamadanReservation[]       @relation("RamadanReservationCustomer")
+  orderStatusEvents    OrderStatusEvent[]         @relation("OrderStatusActor")
+  // PHASE H — earning rules this admin authored / last edited.
+  rewardRulesCreated   RewardEarningRule[]        @relation("RewardRuleCreator")
+  rewardRulesUpdated   RewardEarningRule[]        @relation("RewardRuleUpdater")
+
+  @@index([role])
+  @@index([status])
+}
+
+// ── Customer: addresses, rewards, reviews ───────────────────────────────
+model CustomerAddress {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation("AddressOwner", fields: [userId], references: [id], onDelete: Cascade)
+  label        String // Home | Office | Second Home | Others
+  customLabel  String   @default("") // free-text label when label = "Others" (req #17)
+  address      String
+  area         String   @default("") // delivery area / locality (req #17)
+  instructions String   @default("") // optional delivery instructions
+  latitude     Decimal?
+  longitude    Decimal?
+  isDefault    Boolean  @default(false)
+  isActive     Boolean  @default(true) // req #17 — soft-deactivate instead of losing history
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Super-admin-configured earn rules. Coin→Tk value lives in SystemSetting
+// ("reward_coin_value_tk"), min redeem in "reward_min_redeem_coins".
+model RewardRule {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique // profile_complete | daily_login | order_delivered
+  coins     Int      @default(0)
+  isActive  Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// PHASE H — super-admin authored ORDER earning rules. These sit alongside (not
+// instead of) the three fixed system rules above: RewardRule still drives
+// profile_complete / daily_login, while a delivered order is priced by the
+// highest-priority earning rule that matches it. When no earning rule matches,
+// the legacy flat "order_delivered" RewardRule is used, so existing behaviour is
+// preserved rather than replaced.
+//
+// A rule is never hard-deleted once its id appears in the ledger — it is
+// archived, so historical entries keep pointing at the rule that produced them.
+model RewardEarningRule {
+  id                    Int       @id @default(autoincrement())
+  name                  String
+  description           String    @default("")
+  isActive              Boolean   @default(true)
+  isArchived            Boolean   @default(false)
+  fixedPoints           Int       @default(0) // flat coins per qualifying order
+  pointsPerCurrency     Float     @default(0) // coins per 1 Tk of order total
+  minOrderAmount        Float     @default(0)
+  eligibleOrderStatus   String    @default("delivered")
+  eligiblePaymentStatus String    @default("any") // any | unpaid | pending_verification | verified | paid
+  startsAt              DateTime?
+  endsAt                DateTime?
+  priority              Int       @default(0) // higher wins; ties are rejected on write
+  branchId              Int? // null = every branch
+  branch                Branch?   @relation("BranchRewardRules", fields: [branchId], references: [id], onDelete: SetNull)
+  createdById           Int?
+  createdBy             User?     @relation("RewardRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById           Int?
+  updatedBy             User?     @relation("RewardRuleUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  ledger RewardLedger[] @relation("LedgerEarningRule")
+
+  @@index([isActive, isArchived, priority])
+  @@index([branchId])
+}
+
+// Earn (+) / redeem (−) entries. dedupeKey makes each award idempotent:
+// profile_complete → "once", daily_login → YYYY-MM-DD, order_delivered → order:<id>.
+model RewardLedger {
+  id        Int                @id @default(autoincrement())
+  userId    Int
+  user      User               @relation("RewardOwner", fields: [userId], references: [id], onDelete: Cascade)
+  coins     Int // positive = earned, negative = redeemed
+  reason    String // rule key or "redeem"
+  dedupeKey String             @default("")
+  createdAt DateTime           @default(now())
+  // PHASE H — which earning rule produced this entry (null for system rules and
+  // redemptions). Kept nullable + SetNull so no ledger row can ever be deleted
+  // by touching a rule.
+  ruleId    Int?
+  rule      RewardEarningRule? @relation("LedgerEarningRule", fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, reason, dedupeKey])
+  @@index([userId, createdAt])
+}
+
+model RiderReview {
+  id         Int      @id @default(autoincrement())
+  orderId    Int      @unique
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId Int
+  customer   User     @relation("RiderReviewCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  riderId    Int
+  rider      User     @relation("RiderReviewRider", fields: [riderId], references: [id], onDelete: Cascade)
+  rating     Int // 1-5
+  comment    String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([riderId])
+}
+
+model FoodReview {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId Int
+  customer   User     @relation("FoodReviewCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  rating     Int // 1-5
+  comment    String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@unique([orderId, productId])
+  @@index([productId])
+}
+
+// ── Money flow ──────────────────────────────────────────────────────────
+// Key-value system settings (super-admin managed). Values are strings and
+// parsed by lib/services/settings.ts (e.g. rider_commission_per_delivery).
+model SystemSetting {
+  key         String   @id
+  value       String
+  updatedById Int?
+  updatedBy   User?    @relation("SettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+}
+
+// One commission row per delivered order — the @@unique on orderId is the
+// idempotency guarantee (a re-fired "delivered" transition can never double-pay).
+model RiderCommission {
+  id        Int      @id @default(autoincrement())
+  riderId   Int
+  rider     User     @relation("CommissionRider", fields: [riderId], references: [id], onDelete: Cascade)
+  orderId   Int      @unique
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  branchId  Int?
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  amount    Decimal // snapshot of the per-delivery rate at completion time
+  createdAt DateTime @default(now())
+
+  @@index([riderId, createdAt])
+}
+
+// Withdrawal request lifecycle: pending → approved → paid, or pending → rejected.
+// pending+approved amounts are held (not withdrawable again); paid is deducted.
+model RiderWithdrawal {
+  id              Int       @id @default(autoincrement())
+  riderId         Int
+  rider           User      @relation("WithdrawalRider", fields: [riderId], references: [id], onDelete: Cascade)
+  amount          Decimal
+  status          String    @default("pending") // pending|approved|rejected|paid
+  note            String    @default("") // rider's note (e.g. bKash number)
+  rejectionReason String    @default("")
+  decidedById     Int?
+  decidedBy       User?     @relation("WithdrawalDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt       DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([riderId, status])
+  @@index([status])
+}
+
+// Customer refund against a specific order (per super-admin policy).
+model Refund {
+  id            Int      @id @default(autoincrement())
+  orderId       Int
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount        Decimal
+  reason        String
+  processedById Int?
+  processedBy   User?    @relation("RefundProcessor", fields: [processedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// Branch operating expense (rent/utilities/salary/maintenance/inventory/delivery/other).
+model BranchExpense {
+  id          Int      @id @default(autoincrement())
+  branchId    Int
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  category    String
+  amount      Decimal
+  note        String   @default("")
+  expenseDate DateTime
+  createdById Int?
+  createdBy   User?    @relation("ExpenseRecorder", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([branchId, expenseDate])
+}
+
+// End-of-day per-branch settlement snapshot. One per branch per day.
+model BranchSettlement {
+  id            Int      @id @default(autoincrement())
+  branchId      Int
+  branch        Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  date          DateTime // normalized to midnight
+  orders        Int      @default(0)
+  sales         Decimal  @default(0)
+  commission    Decimal  @default(0)
+  expenses      Decimal  @default(0)
+  net           Decimal  @default(0)
+  generatedById Int?
+  generatedBy   User?    @relation("SettlementGenerator", fields: [generatedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+
+  @@unique([branchId, date])
+}
+
+// Authorized manual financial adjustment (credit adds, debit subtracts).
+model FinancialAdjustment {
+  id          Int      @id @default(autoincrement())
+  type        String // credit | debit
+  amount      Decimal
+  note        String
+  branchId    Int?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdById Int?
+  createdBy   User?    @relation("AdjustmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}
+
+// ── Marketing ───────────────────────────────────────────────────────────
+model Campaign {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String   @default("")
+  type        String   @default("promotion") // discount | offer | promotion
+  startsAt    DateTime
+  endsAt      DateTime
+  isActive    Boolean  @default(true)
+  couponId    Int?
+  coupon      Coupon?  @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  createdById Int?
+  createdBy   User?    @relation("CampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, startsAt])
+}
+
+model Coupon {
+  id           Int       @id @default(autoincrement())
+  code         String    @unique
+  discountType String    @default("percent") // percent | fixed
+  value        Decimal
+  minOrder     Decimal   @default(0)
+  maxUses      Int       @default(0) // 0 = unlimited
+  usedCount    Int       @default(0)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  isActive     Boolean   @default(true)
+  createdById  Int?
+  createdBy    User?     @relation("CouponCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  campaigns Campaign[]
+  orders    Order[]
+}
+
+// Saved audience segment; criteria stored as JSON string and evaluated on demand.
+model AudienceSegment {
+  id          Int      @id @default(autoincrement())
+  name        String
+  criteria    String   @default("{}") // { location?, min_orders?, days_since_last_order? }
+  createdById Int?
+  createdBy   User?    @relation("SegmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}
+
+// Append-only audit trail of every financial action (PDF: accounts audit log).
+model FinancialAuditLog {
+  id        Int      @id @default(autoincrement())
+  actorId   Int?
+  actor     User?    @relation("FinancialAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  action    String // commission_recorded|withdrawal_requested|withdrawal_approved|withdrawal_rejected|withdrawal_paid|setting_updated
+  entity    String // RiderCommission|RiderWithdrawal|SystemSetting
+  entityId  String
+  detail    String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ── Notifications & notices ─────────────────────────────────────────────
+// Notification = per-user inbox item (the bell). Created by order events,
+// complaint events, broadcast notices and marketing sends.
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  type      String   @default("system") // system|order|complaint|notice|marketing|withdrawal
+  // title/body hold FALLBACK text or raw user-written content (e.g. a complaint
+  // subject). System-generated notifications set titleKey/bodyKey/params instead
+  // and are translated to the viewer's locale at render time.
+  title     String   @default("")
+  body      String   @default("")
+  titleKey  String? // i18n key for the title (system-generated notifications)
+  bodyKey   String? // i18n key for the body
+  params    Json? // interpolation vars; string values prefixed "@:" are themselves i18n keys
+  link      String? // in-app path the notification points to
+  isRead    Boolean  @default(false)
+  noticeId  Int?
+  notice    Notice?  @relation(fields: [noticeId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+// Notice = a broadcast announcement composed by super admin (or marketing),
+// targeted at an audience. Publishing fans out Notification rows to matching users.
+model Notice {
+  id            Int            @id @default(autoincrement())
+  authorId      Int
+  author        User           @relation("NoticeAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  title         String
+  body          String         @default("")
+  audience      String         @default("all") // all|super_admin|management|marketing|branch_manager|accounts|rider|customer
+  type          String         @default("notice") // notice|marketing
+  recipients    Int            @default(0) // how many users it fanned out to
+  createdAt     DateTime       @default(now())
+  notifications Notification[]
+
+  @@index([audience])
+  @@index([createdAt])
+}
+
+// ── Complaints ──────────────────────────────────────────────────────────
+model Complaint {
+  id            Int      @id @default(autoincrement())
+  complainantId Int
+  complainant   User     @relation("ComplaintComplainant", fields: [complainantId], references: [id], onDelete: Cascade)
+  recipientRole String // super_admin|branch_manager|accounts|management|marketing
+  branchId      Int?
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  orderId       Int?
+  order         Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  category      String   @default("other") // food_quality|delivery|service|payment|app|other
+  subject       String
+  message       String
+  status        String   @default("pending") // pending|in_progress|resolved|closed
+  assignedToId  Int?
+  assignedTo    User?    @relation("ComplaintAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  messages ComplaintMessage[]
+
+  @@index([recipientRole, status])
+  @@index([complainantId])
+  @@index([branchId])
+}
+
+model ComplaintMessage {
+  id          Int       @id @default(autoincrement())
+  complaintId Int
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  senderId    Int
+  sender      User      @relation("ComplaintMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body        String
+  createdAt   DateTime  @default(now())
+
+  @@index([complaintId])
+}
+
+model Branch {
+  id                Int       @id @default(autoincrement())
+  name              String
+  address           String
+  phone             String
+  email             String    @default("")
+  latitude          Decimal?
+  longitude         Decimal?
+  deliveryRadiusKm  Decimal   @default(3.0)
+  // PHASE 11 — branch-level delivery fee applied when the order is inside the
+  // branch radius and no named delivery area supplies its own charge. Decimal
+  // for money safety; validated non-negative in the service.
+  deliveryFee       Decimal   @default(0)
+  // Brand this branch operates: cheez | madchef | combined. Existing branches
+  // are migrated to "combined" (documented safe default) so nothing is hidden;
+  // a combined branch may manage products of either brand.
+  brandType         String    @default("combined")
+  // B2: branch-level estimated preparation time (minutes). Snapshotted onto an
+  // order at confirmation so later changes never affect existing orders.
+  prepTimeMinutes   Int       @default(30)
+  // B1: pickup point configuration (used when delivery is out of coverage).
+  pickupEnabled     Boolean   @default(true)
+  pickupAddress     String    @default("")
+  pickupPhone       String    @default("")
+  bkashNumber       String    @default("")
+  // PHASE S — manual bKash acceptance for this branch. Disabled by default so a
+  // branch cannot accidentally advertise a number it has not configured.
+  bkashEnabled      Boolean   @default(false)
+  bkashInstructions String    @default("")
+  managerId         Int?
+  manager           User?     @relation("BranchManager", fields: [managerId], references: [id], onDelete: SetNull)
+  isActive          Boolean   @default(true)
+  holdReason        String    @default("") // why the super admin held branch operations
+  // req #5 — archival (super admin only). An archived branch keeps ALL history
+  // (orders/payments/reservations/employees/riders/chats) but never accepts new
+  // orders and never appears as an active customer choice. Distinct from
+  // isActive (a reversible operational hold) — archive is the "delete" outcome
+  // for a branch that has protected dependencies.
+  isArchived        Boolean   @default(false)
+  archivedAt        DateTime?
+  archivedById      Int?
+  openingTime       String? // "HH:MM"
+  closingTime       String? // "HH:MM"
+  logo              String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  categories           Category[]
+  products             Product[]
+  orders               Order[]
+  riders               RiderProfile[]
+  dutyLogs             RiderDutyLog[]
+  managerAssignments   BranchManagerAssignment[]
+  activityLogs         ManagerActivityLog[]
+  complaints           Complaint[]
+  commissions          RiderCommission[]
+  expenses             BranchExpense[]
+  settlements          BranchSettlement[]
+  adjustments          FinancialAdjustment[]
+  timeSlots            DeliveryTimeSlot[]
+  staffAttendance      StaffAttendance[]
+  tableReservations    TableReservation[]
+  ramadanTables        RamadanTable[]
+  ramadanBookings      RamadanBooking[]
+  deliveryZones        BranchDeliveryZone[]
+  deliveryAreas        BranchDeliveryArea[]
+  rewardRules          RewardEarningRule[]        @relation("BranchRewardRules")
+  employeeTeams        EmployeeTeam[]             @relation("BranchEmployeeTeams")
+  tables               BranchTable[]
+  employees            BranchEmployee[]
+  employeeAttendance   EmployeeAttendance[]
+  dutySessions         RiderBranchDutySession[]   @relation("BranchDutySessions")
+  receiveConfirmations OrderReceiveConfirmation[] @relation("BranchReceiveConfirmations")
+  ramadanConfig        RamadanConfig?
+  ramadanSlots         RamadanTimeSlot[]
+  ramadanMenus         RamadanMenu[]
+  ramadanReservations  RamadanReservation[]       @relation("RamadanReservationBranch")
+}
+
+// ── B1: Delivery zones (circular coverage areas) ────────────────────────
+// Each zone is a named circle (center + radius). An address is "covered" when
+// it falls inside the branch's primary radius OR any active zone. Distances are
+// computed server-side with the Haversine formula — never trusted from clients.
+model BranchDeliveryZone {
+  id          Int      @id @default(autoincrement())
+  branchId    Int
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name        String
+  centerLat   Decimal
+  centerLng   Decimal
+  radiusKm    Decimal
+  deliveryFee Decimal  @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([branchId])
+}
+
+// ── req #1: Named delivery areas (Dhanmondi, Mirpur, …) ──────────────────
+// The AUTHORITATIVE delivery-area model: a named administrative area a branch
+// delivers to, carrying its own hold state, estimated delivery time, and
+// delivery charge. Complements BranchDeliveryZone (coordinate coverage circles
+// used for radius checks) rather than duplicating it — an area optionally
+// carries a centroid (centerLat/Lng) for distance, but a name-only area is
+// valid. New delivery orders snapshot the selected area's name/charge/time onto
+// the order so later edits never change existing orders. Held areas block only
+// NEW delivery orders. Duplicate normalized names per branch are prevented by
+// the unique index.
+model BranchDeliveryArea {
+  id                       Int      @id @default(autoincrement())
+  branchId                 Int
+  branch                   Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name                     String
+  normalizedName           String   @default("")
+  isActive                 Boolean  @default(true)
+  isHeld                   Boolean  @default(false) // hold blocks NEW delivery orders only
+  holdReason               String   @default("")
+  estimatedDeliveryMinutes Int      @default(45)
+  deliveryCharge           Decimal  @default(0)
+  centerLat                Decimal? // optional centroid for distance/coverage
+  centerLng                Decimal?
+  updatedById              Int? // audit: who last changed it (app-level SetNull)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  orders Order[] @relation("OrderDeliveryArea")
+
+  @@unique([branchId, normalizedName])
+  @@index([branchId])
+}
+
+// ── req #6/#13: Rider order-assignment offer + response ──────────────────
+// One row per assignment offer to a rider. `assignRiderToOrder` still sets
+// order.riderId (existing flow) AND opens a pending assignment here; the rider
+// then Accepts (status=accepted, acceptedAt) or Rejects (status=rejected +
+// reason → order.riderId cleared, BM notified). A reassignment supersedes prior
+// pending rows. This is the audit trail behind the rider new-order popup and the
+// BM acceptance-details view — acceptance is NEVER inferred from UI state.
+model RiderOrderAssignment {
+  id              Int       @id @default(autoincrement())
+  orderId         Int
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  riderId         Int
+  rider           User      @relation("AssignmentRider", fields: [riderId], references: [id], onDelete: Cascade)
+  branchId        Int
+  sessionId       Int?
+  status          String    @default("pending") // pending|accepted|rejected|superseded
+  distanceKm      Decimal? // branch → delivery distance, computed server-side
+  rejectionReason String    @default("") // user-entered, stored verbatim
+  respondedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([orderId, status])
+  @@index([riderId, status])
+}
+
+// ── B3: Graphical table layout ──────────────────────────────────────────
+model BranchTable {
+  id        Int      @id @default(autoincrement())
+  branchId  Int
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name      String // display name / table number
+  posX      Int      @default(0) // layout position (px on the editor canvas)
+  posY      Int      @default(0)
+  width     Int      @default(80)
+  height    Int      @default(80)
+  seats     Int      @default(4)
+  status    String   @default("available") // available | occupied | out_of_service
+  section   String   @default("") // optional area/section label
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reservations        TableReservation[]
+  ramadanReservations RamadanReservation[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+}
+
+// ── B5: Branch employees (distinct from platform Users) ─────────────────
+model BranchEmployee {
+  id               Int           @id @default(autoincrement())
+  branchId         Int
+  branch           Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  firstName        String
+  lastName         String        @default("")
+  employeeCode     String
+  phone            String        @default("")
+  email            String        @default("")
+  photo            String? // relative upload key (webp)
+  joiningDate      DateTime?
+  department       String        @default("")
+  role             String        @default("waiter") // kitchen|chef|waiter|cashier|delivery|cleaner|security|supervisor|others
+  // PHASE M — a free-text job term, required only when role = "others" so the
+  // existing validated roles keep their meaning instead of becoming free text.
+  customRole       String        @default("")
+  isActive         Boolean       @default(true)
+  // PHASE M — employment status. "All" is a LIST FILTER only and is never
+  // stored. Quitting preserves the employee row, their attendance and every
+  // report; it only removes them from the new-attendance roster.
+  employmentStatus String        @default("active") // active | quit_job
+  quitAt           DateTime?
+  quitReason       String        @default("")
+  teamId           Int?
+  team             EmployeeTeam? @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  notes            String        @default("")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  attendance EmployeeAttendance[]
+
+  @@unique([branchId, employeeCode])
+  @@index([branchId])
+  @@index([branchId, role])
+  @@index([branchId, employmentStatus])
+  @@index([teamId])
+}
+
+// PHASE M — branch staff teams (Kitchen, Floor, …). Archived instead of deleted
+// so an employee's history keeps naming the team they belonged to.
+model EmployeeTeam {
+  id          Int      @id @default(autoincrement())
+  branchId    Int
+  branch      Branch   @relation("BranchEmployeeTeams", fields: [branchId], references: [id], onDelete: Cascade)
+  name        String
+  description String   @default("")
+  isActive    Boolean  @default(true)
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members BranchEmployee[] @relation("TeamMembers")
+
+  @@unique([branchId, name])
+  @@index([branchId])
+}
+
+// ── B6: Employee attendance (one row per employee per date) ──────────────
+model EmployeeAttendance {
+  id           Int            @id @default(autoincrement())
+  employeeId   Int
+  employee     BranchEmployee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branchId     Int
+  branch       Branch         @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  date         DateTime // normalized to midnight
+  status       String         @default("present") // present|absent|late|leave|half_day
+  checkIn      String? // "HH:MM"
+  checkOut     String? // "HH:MM"
+  note         String         @default("")
+  recordedById Int?
+  recordedBy   User?          @relation("AttendanceRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([branchId, date])
+}
+
+// ── Branch manager: delivery hours, attendance, reservations ────────────
+model DeliveryTimeSlot {
+  id        Int      @id @default(autoincrement())
+  branchId  Int
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  label     String   @default("") // e.g. "Lunch", "Dinner"
+  startTime String // "HH:MM"
+  endTime   String // "HH:MM"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([branchId])
+}
+
+// Daily attendance marking for staff (branch manager, rider, etc.).
+model StaffAttendance {
+  id       Int      @id @default(autoincrement())
+  userId   Int
+  user     User     @relation("AttendanceStaff", fields: [userId], references: [id], onDelete: Cascade)
+  branchId Int?
+  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  date     DateTime // normalized to midnight
+  status   String   @default("present") // present | absent | leave
+  note     String   @default("")
+  markedAt DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+// Table reservation request; a chat session (ReservationMessage[]) links
+// the customer and the branch manager.
+model TableReservation {
+  id              Int          @id @default(autoincrement())
+  branchId        Int
+  branch          Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customerId      Int
+  customer        User         @relation("ReservationCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  guestName       String
+  guestPhone      String
+  partySize       Int          @default(2)
+  requestedAt     DateTime // requested date/time
+  // B3: pending | accepted | rejected | cancelled | completed | expired
+  // (legacy "confirmed" still accepted for backward compatibility).
+  status          String       @default("pending")
+  rejectionReason String       @default("")
+  tableId         Int?
+  table           BranchTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  note            String       @default("")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  messages ReservationMessage[]
+
+  @@index([branchId, status])
+  @@index([customerId])
+  @@index([tableId, requestedAt])
+}
+
+model ReservationMessage {
+  id            Int              @id @default(autoincrement())
+  reservationId Int
+  reservation   TableReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  senderId      Int
+  sender        User             @relation("ReservationMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body          String
+  createdAt     DateTime         @default(now())
+
+  @@index([reservationId])
+}
+
+// ── Ramadan table booking (BM configures layout/capacity) ───────────────
+model RamadanTable {
+  id        Int      @id @default(autoincrement())
+  branchId  Int
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name      String // e.g. "Table 1"
+  capacity  Int      @default(4)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  bookings RamadanBooking[]
+
+  @@index([branchId])
+}
+
+model RamadanBooking {
+  id          Int          @id @default(autoincrement())
+  tableId     Int
+  table       RamadanTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  branchId    Int
+  branch      Branch       @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customerId  Int
+  customer    User         @relation("RamadanBookingCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  guestName   String
+  guestPhone  String
+  partySize   Int          @default(2)
+  bookingDate DateTime // the iftar date
+  status      String       @default("booked") // booked | cancelled
+  createdAt   DateTime     @default(now())
+
+  @@unique([tableId, bookingDate])
+  @@index([branchId, bookingDate])
+}
+
+model BranchManagerAssignment {
+  id           Int       @id @default(autoincrement())
+  managerId    Int
+  manager      User      @relation("AssignmentManager", fields: [managerId], references: [id], onDelete: Cascade)
+  branchId     Int
+  branch       Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  assignedAt   DateTime  @default(now())
+  relievedAt   DateTime? // null = currently active
+  assignedById Int?
+  assignedBy   User?     @relation("AssignmentBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  notes        String    @default("")
+
+  @@index([branchId, relievedAt])
+  @@index([managerId, relievedAt])
+}
+
+model ManagerActivityLog {
+  id           Int      @id @default(autoincrement())
+  managerId    Int
+  manager      User     @relation("ActivityManager", fields: [managerId], references: [id], onDelete: Cascade)
+  branchId     Int?
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  activityType String // login|logout|action
+  description  String   @default("")
+  ipAddress    String?
+  timestamp    DateTime @default(now())
+
+  @@index([timestamp])
+}
+
+model Category {
+  id                Int       @id @default(autoincrement())
+  // Scope: a concrete branch id, or NULL = "Main Branch (Global)" — a category
+  // available to every branch's product forms. Global scope is modeled as a
+  // null branchId (no hardcoded "main branch" row). See lib/services/catalog.ts
+  // (categoryScopeForProduct) for how a branch's eligible categories = its own
+  // branch categories PLUS all global ones.
+  branchId          Int?
+  branch            Branch?   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name              String
+  // Case/space-insensitive form of `name`, used to block duplicate active
+  // categories inside the same effective scope (global, or per-branch).
+  normalizedName    String    @default("")
+  description       String    @default("")
+  isActive          Boolean   @default(true)
+  // req #3 — activation audit: who last flipped isActive and when (app-level
+  // SetNull, matching BranchDeliveryArea.updatedById).
+  statusChangedById Int?
+  statusChangedAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  products Product[]
+
+  @@index([branchId])
+  @@index([normalizedName])
+}
+
+model Product {
+  id                 Int       @id @default(autoincrement())
+  branchId           Int
+  branch             Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  categoryId         Int?
+  category           Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  name               String
+  description        String    @default("")
+  // Legacy single price — retained as a fallback/base after variations were
+  // introduced. New pricing lives in ProductVariation; migration backfills one
+  // default variation per existing product from this value.
+  price              Decimal
+  // Brand this product belongs to: cheez | madchef. Null = inherits the
+  // branch's sole brand (only combined branches require an explicit value).
+  brand              String?
+  discount           Decimal   @default(0) // percentage 0-100
+  image              String?
+  isAvailable        Boolean   @default(true)
+  deactivationReason String    @default("") // why the BM deactivated it
+  heldByAdmin        Boolean   @default(false) // super-admin global hold (blocks sale everywhere)
+  preparationTime    Int       @default(20)
+  isPopular          Boolean   @default(false)
+  isRecommended      Boolean   @default(false)
+  // req #4 — PRODUCT-LEVEL crust/thickness policy: "THICK" | "THIN" | "BOTH".
+  // Stable internal values (never translated labels). This governs which crust a
+  // customer may pick; the per-size price variations in ProductVariation are
+  // untouched. THICK/THIN = the single fixed crust; BOTH = the customer must
+  // choose. Validated by isProductVariationType() in lib/constants/enums.ts.
+  // Existing rows are backfilled from ProductVariation.variantType where it
+  // reliably says thin/thick, otherwise the documented safe default "THICK"
+  // (a single fixed crust — introduces no new mandatory choice on legacy data).
+  variationType      String    @default("THICK")
+  // Super-admin soft delete (req #4). A non-null deletedAt hides the product
+  // from every catalog list + blocks new orders, while historical OrderItem /
+  // FoodReview rows keep pointing at it (relational + audit integrity). Never a
+  // hard delete when order history exists. deletedById records the actor.
+  deletedAt          DateTime?
+  deletedById        Int?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  orderItems OrderItem[]
+  reviews    FoodReview[]
+  variations ProductVariation[]
+
+  @@index([branchId])
+}
+
+// A purchasable size/option of a product (e.g. Small ৳350, Medium ৳550).
+// A product must keep at least one enabled variation; exactly one isDefault.
+model ProductVariation {
+  id             Int      @id @default(autoincrement())
+  productId      Int
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name           String // e.g. "Small", "Medium", "8 inch"
+  sizeLabel      String   @default("") // optional display label
+  price          Decimal
+  compareAtPrice Decimal? // optional strike-through price
+  servingInfo    String   @default("") // e.g. "serves 2", "6 slices"
+  variantType    String   @default("") // optional crust/type descriptor
+  sortOrder      Int      @default(0)
+  isDefault      Boolean  @default(false)
+  isEnabled      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  orderItems OrderItem[]
+
+  @@unique([productId, name])
+  @@index([productId])
+}
+
+model Order {
+  id                       Int                 @id @default(autoincrement())
+  // Unique, human-readable, immutable order number (req #15): ORD-YYYYMMDD-000001.
+  // Generated race-safely from OrderNumberCounter inside the create transaction;
+  // the internal `id` is never the customer-facing reference. Nullable only so
+  // the additive migration can backfill existing rows; the app always sets it.
+  orderNumber              String?             @unique
+  customerId               Int
+  customer                 User                @relation("CustomerOrders", fields: [customerId], references: [id])
+  branchId                 Int
+  branch                   Branch              @relation(fields: [branchId], references: [id])
+  riderId                  Int?
+  rider                    User?               @relation("RiderOrders", fields: [riderId], references: [id], onDelete: SetNull)
+  status                   String              @default("pending")
+  paymentMethod            String              @default("cash") // cash|bkash
+  // PHASE S — payment lifecycle. COD stays "unpaid" until the delivery workflow
+  // settles it; a manual bKash submission moves to "pending_verification" and is
+  // NEVER auto-marked paid. Staff verification records the actor + timestamp, and
+  // a rejection keeps the reason exactly as typed.
+  // unpaid | pending_verification | verified | rejected | paid
+  paymentStatus            String              @default("unpaid")
+  // PHASE R — duplicate-checkout guard. The checkout page sends one key per
+  // attempt; a retry or a double-tap reuses it, so the second request returns
+  // the SAME order instead of creating a second one. Null for orders placed
+  // without a key (staff tools, older orders), which the unique index allows.
+  idempotencyKey           String?
+  bkashTransactionId       String              @default("")
+  bkashPayerPhone          String              @default("")
+  // Immutable snapshot of the branch bKash number the customer actually paid to,
+  // so later branch edits never rewrite what the customer was told.
+  bkashDestinationNumber   String              @default("")
+  paymentSubmittedAt       DateTime?
+  paymentVerifiedById      Int?
+  paymentVerifiedAt        DateTime?
+  paymentRejectionReason   String              @default("")
+  totalAmount              Decimal             @default(0)
+  couponId                 Int?
+  coupon                   Coupon?             @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  discountAmount           Decimal             @default(0)
+  foodNotes                String              @default("")
+  // B2: immutable snapshot of the branch's estimated prep time at confirmation.
+  prepTimeSnapshot         Int?
+  // B1: delivery vs pickup + the delivery coordinates coverage was checked against.
+  fulfillmentType          String              @default("delivery") // delivery | pickup
+  deliveryLat              Decimal?
+  deliveryLng              Decimal?
+  deliveryAddress          String
+  // req #1/#13/#22 — IMMUTABLE delivery snapshots taken at order creation. Later
+  // edits to the area/charge/time never change an existing order.
+  deliveryAreaId           Int?
+  deliveryArea             BranchDeliveryArea? @relation("OrderDeliveryArea", fields: [deliveryAreaId], references: [id], onDelete: SetNull)
+  deliveryAreaName         String              @default("") // snapshot of the area name
+  deliveryCharge           Decimal             @default(0) // snapshot of the area's charge
+  deliveryEstimateMinutes  Int? // snapshot of the area's estimated delivery time
+  // PHASE 11/26 — snapshots of the RADIUS rule that authorised this delivery.
+  // Server-computed at order time from trusted coordinates; a later change to
+  // the branch radius/fee never rewrites an existing order.
+  deliveryDistanceKm       Decimal?
+  deliveryRadiusKmSnapshot Decimal?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+
+  items                OrderItem[]
+  assignments          RiderOrderAssignment[]
+  complaints           Complaint[]
+  commission           RiderCommission?
+  riderReview          RiderReview?
+  foodReviews          FoodReview[]
+  refunds              Refund[]
+  receiveConfirmations OrderReceiveConfirmation[]
+  deliveryChats        OrderDeliveryChatThread[]
+  statusEvents         OrderStatusEvent[]
+
+  // A customer may reuse a key only for the same checkout attempt.
+  @@unique([customerId, idempotencyKey])
+  @@index([branchId])
+  @@index([customerId])
+  @@index([riderId])
+  @@index([status])
+  // PHASE S — fast duplicate-transaction lookups (uniqueness enforced in the
+  // service, since the vast majority of rows carry an empty string).
+  @@index([bkashTransactionId])
+}
+
+// Per-day monotonic counter backing the unique order number (req #15). One row
+// per UTC date key (YYYYMMDD); `seq` is incremented atomically inside the order
+// create transaction (upsert + increment → row-lock serialized on Postgres,
+// write-serialized on SQLite), so concurrent orders never collide. The unique
+// index on Order.orderNumber is the final backstop.
+model OrderNumberCounter {
+  dateKey String @id // "YYYYMMDD" (UTC)
+  seq     Int    @default(0)
+}
+
+model OrderItem {
+  id            Int               @id @default(autoincrement())
+  orderId       Int
+  order         Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     Int
+  product       Product           @relation(fields: [productId], references: [id])
+  // IMMUTABLE product snapshot. The order line used to render its name and photo
+  // through the live `product` relation, so renaming or re-photographing a
+  // product silently REWROTE every historical order that contained it. Both are
+  // captured at order time and never touched again. Empty/null on rows written
+  // before this column existed — the serializer falls back to the relation for
+  // those, so no historical order loses its label.
+  productName   String            @default("")
+  productImage  String?
+  // Selected variation + name snapshot. variationId is SetNull so historical
+  // order lines survive variation deletion; variationName preserves what was
+  // ordered. unitPrice is the price snapshot at order time (never mutated).
+  variationId   Int?
+  variation     ProductVariation? @relation(fields: [variationId], references: [id], onDelete: SetNull)
+  variationName String            @default("")
+  // req #4 — IMMUTABLE snapshot of the crust/thickness the customer actually
+  // ordered ("THICK" | "THIN" | ""). Editing the product's variationType later
+  // never rewrites historical order lines.
+  variationType String            @default("")
+  quantity      Int               @default(1)
+  unitPrice     Decimal
+  foodNote      String            @default("")
+}
+
+model RiderProfile {
+  id                     Int       @id @default(autoincrement())
+  userId                 Int       @unique
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedBranchId       Int?
+  assignedBranch         Branch?   @relation(fields: [assignedBranchId], references: [id], onDelete: SetNull)
+  bloodGroup             String    @default("")
+  education              String    @default("")
+  presentAddress         String    @default("")
+  permanentAddress       String    @default("")
+  nidNumber              String    @default("")
+  drivingLicenseNumber   String    @default("")
+  bikeRegistrationNumber String    @default("")
+  vehicleType            String    @default("")
+  emergencyContactName   String    @default("")
+  emergencyContactPhone  String    @default("")
+  nidFrontImage          String?
+  nidBackImage           String?
+  licenseImage           String?
+  isOnline               Boolean   @default(false)
+  currentLat             Decimal?
+  currentLng             Decimal?
+  currentAccuracy        Decimal? // req #12 — latest GPS accuracy (metres)
+  lastPingAt             DateTime? // req #12 — latest validated location timestamp
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
+// Live route trail while a rider is on duty (visited locations + travel route).
+model RiderRoutePoint {
+  id         Int      @id @default(autoincrement())
+  riderId    Int
+  rider      User     @relation("RoutePointRider", fields: [riderId], references: [id], onDelete: Cascade)
+  lat        Decimal
+  lng        Decimal
+  orderId    Int? // set when the ping is tied to an active delivery
+  recordedAt DateTime @default(now())
+
+  @@index([riderId, recordedAt])
+}
+
+// Generic login history for every role (PDF: login history recorded).
+model LoginHistory {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation("LoginUser", fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress String   @default("")
+  userAgent String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model RiderDutyLog {
+  id        Int       @id @default(autoincrement())
+  riderId   Int
+  rider     User      @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  branchId  Int
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  date      DateTime // normalized to midnight — one duty per rider per day
+  clockIn   DateTime
+  clockOut  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([riderId, date])
+  @@index([date])
+}
+
+// ── Part C: Rider dynamic branch duty sessions ──────────────────────────
+// The authoritative online/duty session — branch-scoped, multiple per day
+// (branch switching), with start/end/status. Complements RiderDutyLog (the
+// existing one-per-day clock record, kept for attendance/history) rather than
+// duplicating it. Exactly one `active` session per rider is enforced in a
+// transaction at start time.
+model RiderBranchDutySession {
+  id        Int       @id @default(autoincrement())
+  riderId   Int
+  rider     User      @relation("RiderDutySessions", fields: [riderId], references: [id], onDelete: Cascade)
+  branchId  Int
+  branch    Branch    @relation("BranchDutySessions", fields: [branchId], references: [id], onDelete: Cascade)
+  status    String    @default("active") // active | ended
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  endReason String    @default("") // offline | switch
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  chatThread    RiderDutyChatThread?
+  confirmations OrderReceiveConfirmation[]
+
+  @@index([riderId, status])
+  @@index([branchId, status])
+}
+
+// One receive-confirmation per order (unique) — the rider physically accepted it.
+// One confirmation per (order, rider): idempotent for the same rider, and a
+// reassigned rider records their own confirmation while the previous one is
+// retained as an audit trail. The "current" confirmation is the row whose
+// riderId matches order.riderId.
+model OrderReceiveConfirmation {
+  id          Int                     @id @default(autoincrement())
+  orderId     Int
+  order       Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  riderId     Int
+  rider       User                    @relation("ReceiveConfirmRider", fields: [riderId], references: [id], onDelete: Cascade)
+  branchId    Int
+  branch      Branch                  @relation("BranchReceiveConfirmations", fields: [branchId], references: [id], onDelete: Cascade)
+  sessionId   Int?
+  session     RiderBranchDutySession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  status      String                  @default("confirmed")
+  confirmedAt DateTime                @default(now())
+
+  @@unique([orderId, riderId])
+  @@index([orderId])
+  @@index([riderId])
+  @@index([branchId])
+}
+
+// ── Rider ↔ Branch Manager duty chat (one thread per duty session) ──────
+model RiderDutyChatThread {
+  id                Int                    @id @default(autoincrement())
+  sessionId         Int                    @unique
+  session           RiderBranchDutySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  riderId           Int
+  branchId          Int
+  isClosed          Boolean                @default(false)
+  riderLastReadAt   DateTime?
+  managerLastReadAt DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  messages RiderDutyChatMessage[]
+
+  @@index([branchId])
+}
+
+model RiderDutyChatMessage {
+  id        Int                 @id @default(autoincrement())
+  threadId  Int
+  thread    RiderDutyChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId  Int
+  sender    User                @relation("DutyChatSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime            @default(now())
+
+  @@index([threadId])
+}
+
+// ── Rider ↔ Customer delivery chat (per order; new thread per assigned rider) ──
+model OrderDeliveryChatThread {
+  id                 Int       @id @default(autoincrement())
+  orderId            Int
+  order              Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  riderId            Int
+  customerId         Int
+  status             String    @default("active") // active | closed
+  riderLastReadAt    DateTime?
+  customerLastReadAt DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  messages OrderDeliveryChatMessage[]
+
+  @@index([orderId, status])
+  @@index([riderId])
+}
+
+model OrderDeliveryChatMessage {
+  id        Int                     @id @default(autoincrement())
+  threadId  Int
+  thread    OrderDeliveryChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId  Int
+  sender    User                    @relation("DeliveryChatSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime                @default(now())
+
+  @@index([threadId])
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// B7/B8/B9 — Ramadan reservation system. Reuses the physical BranchTable for
+// seating (so normal + Ramadan bookings can't overlap the same table) and the
+// FinancialAuditLog for payment audit. Dates are stored at UTC midnight; slot
+// times are "HH:MM" strings. No hardcoded Ramadan year / Iftar time.
+// ══════════════════════════════════════════════════════════════════════════
+
+model RamadanConfig {
+  id                    Int       @id @default(autoincrement())
+  branchId              Int       @unique
+  branch                Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  isEnabled             Boolean   @default(false)
+  bookingStartDate      DateTime? // UTC midnight (inclusive)
+  bookingEndDate        DateTime? // UTC midnight (inclusive)
+  // Advance-payment rule: none | fixed | percent | per_guest. value is the
+  // amount / percentage / per-guest amount; threshold guests activates it.
+  advanceType           String    @default("none")
+  advanceValue          Decimal   @default(0)
+  advanceGuestThreshold Int       @default(0)
+  paymentDeadlineHours  Int       @default(0) // 0 = no deadline
+  cancellationPolicy    String    @default("")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model RamadanTimeSlot {
+  id        Int      @id @default(autoincrement())
+  branchId  Int
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  label     String
+  startTime String // "HH:MM"
+  endTime   String // "HH:MM"
+  capacity  Int      @default(0) // 0 = unlimited
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reservations RamadanReservation[]
+
+  @@index([branchId])
+}
+
+model RamadanMenu {
+  id              Int       @id @default(autoincrement())
+  branchId        Int
+  branch          Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name            String
+  description     String    @default("")
+  image           String? // webp key
+  price           Decimal
+  compareAtPrice  Decimal?
+  servingCapacity Int       @default(4) // serves N guests per unit
+  startDate       DateTime?
+  endDate         DateTime?
+  allowedSlots    String    @default("") // CSV of slot ids; empty = all slots
+  minGuests       Int       @default(0)
+  maxGuests       Int       @default(0)
+  isActive        Boolean   @default(true)
+  // PHASE L — a platter that has been booked is ARCHIVED instead of deleted, so
+  // reservation history keeps its link. Archived implies inactive.
+  isArchived      Boolean   @default(false)
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  items        RamadanMenuItem[]
+  reservations RamadanReservation[]
+
+  @@index([branchId])
+}
+
+model RamadanMenuItem {
+  id        Int         @id @default(autoincrement())
+  menuId    Int
+  menu      RamadanMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int         @default(0)
+
+  @@index([menuId])
+}
+
+model RamadanReservation {
+  id              Int              @id @default(autoincrement())
+  branchId        Int
+  branch          Branch           @relation("RamadanReservationBranch", fields: [branchId], references: [id], onDelete: Cascade)
+  customerId      Int
+  customer        User             @relation("RamadanReservationCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  tableId         Int?
+  table           BranchTable?     @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  slotId          Int?
+  slot            RamadanTimeSlot? @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  bookingDate     DateTime // UTC midnight
+  guestName       String
+  guestPhone      String
+  partySize       Int              @default(2)
+  specialRequest  String           @default("") // user-written, stored verbatim
+  status          String           @default("pending_payment") // pending_payment|pending|confirmed|rejected|cancelled|completed
+  rejectionReason String           @default("")
+
+  // Immutable menu snapshot (never changes when the source menu is edited).
+  menuId              Int?
+  menuName            String  @default("")
+  menuDescription     String  @default("")
+  menuItemsSnapshot   String  @default("")
+  menuImage           String?
+  menuUnitPrice       Decimal @default(0)
+  menuServingCapacity Int     @default(0)
+  menuQuantity        Int     @default(1)
+  slotLabel           String  @default("")
+  totalAmount         Decimal @default(0)
+  advanceRequired     Decimal @default(0)
+
+  menu      RamadanMenu?               @relation(fields: [menuId], references: [id], onDelete: SetNull)
+  payment   RamadanReservationPayment?
+  createdAt DateTime                   @default(now())
+  updatedAt DateTime                   @updatedAt
+
+  @@index([branchId, bookingDate])
+  @@index([customerId])
+  @@index([tableId, bookingDate])
+}
+
+model RamadanReservationPayment {
+  id             Int                @id @default(autoincrement())
+  reservationId  Int                @unique
+  reservation    RamadanReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  branchId       Int
+  amount         Decimal            @default(0) // required advance
+  paidAmount     Decimal            @default(0)
+  refundedAmount Decimal            @default(0)
+  status         String             @default("unpaid") // unpaid|pending|paid|failed|refunded
+  method         String             @default("demo") // demo|bkash|card
+  gatewayRef     String             @default("")
+  // Unique idempotency key for the confirm/paid transition — a repeated
+  // gateway callback with the same key never double-charges.
+  idempotencyKey String?            @unique
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([branchId, status])
+}
+
+/// PHASE J — immutable per-transition audit for the order workflow. One row per
+/// accepted status change: who moved it, from what, to what, when, and (for a
+/// rejection/cancellation) the reason EXACTLY as the staff member typed it.
+/// History is append-only; nothing here is ever rewritten by later edits.
+model OrderStatusEvent {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus String
+  toStatus   String
+  actorId    Int?
+  actor      User?    @relation("OrderStatusActor", fields: [actorId], references: [id], onDelete: SetNull)
+  reason     String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
