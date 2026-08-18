@@ -48,23 +48,17 @@ export default async function CustomerBranchesPage({
     customerLocationStatus(me.id),
   ]);
   const mapsKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null;
-  const eligibleId = nearest.nearest?.id ?? null;
-  // PHASE P — distance per branch, so a customer outside every zone can still
-  // see how far each real outlet is instead of an unexplained disabled card.
+  const nearestId = nearest.nearest?.id ?? null;
   const distanceById = new Map(nearest.branches.map((b) => [b.id, b.distance_km]));
-  // Out of zone = we DO know where they are, and nothing covers it. That is a
-  // different situation from "we have no location yet" and is worded as such.
-  const outOfZone = Boolean(nearest.point) && eligibleId === null;
+  const coveredById = new Map(nearest.branches.map((b) => [b.id, b.covered]));
+  const hasCoveredBranches = nearest.branches.some((b) => b.covered);
+  // Out of zone = we DO know where they are, and nothing covers it.
+  const outOfZone = Boolean(nearest.point) && !hasCoveredBranches;
 
   return (
     <>
       <PageHeader title={t("customer.restaurantsTitle")} subtitle={t("customer.restaurantsSubtitle")} />
 
-      {/* PHASE E — this is where a customer arrives after logging in, so the
-          location card lives here too: it explains what the location is used
-          for and requests it ON DEMAND (never automatically, and never again
-          on its own after a refusal). Once a usable location exists the card
-          steps out of the way. */}
       {!nearest.point ? (
         <div className="mb-4" data-testid="location-setup">
           <LocationPermissionCard
@@ -78,9 +72,7 @@ export default async function CustomerBranchesPage({
         </div>
       ) : null}
 
-      {/* req #11 — branch search (server-side; no-JS friendly GET form). */}
-      {/* Free-text search only — no field has a constraint to validate, so the
-          only thing to standardize here is suppressing the browser's bubbles. */}
+      {/* Branch search (server-side GET form) */}
       <form method="GET" noValidate className="mb-4 flex flex-wrap items-center gap-2" data-testid="branch-search-form">
         <input
           type="search"
@@ -99,9 +91,9 @@ export default async function CustomerBranchesPage({
         ) : null}
       </form>
 
-      {/* Explanation banner (req #4). */}
+      {/* Explanation banner */}
       <div className="mb-4 rounded-xl bg-brand-50 px-4 py-2.5 text-sm text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" data-testid="nearest-explainer">
-        {eligibleId
+        {hasCoveredBranches
           ? t("nearestBranch.explainerEnabled", { branch: nearest.nearest?.name ?? "" })
           : nearest.point
             ? t("nearestBranch.explainerNone")
@@ -113,9 +105,7 @@ export default async function CustomerBranchesPage({
         ) : null}
       </div>
 
-      {/* PHASE P — outside every branch's coverage: say why, and offer the two
-          things that can actually change the outcome (retry the location, or
-          update the saved address). Delivery stays disabled throughout. */}
+      {/* Outside every branch's coverage banner */}
       {outOfZone ? (
         <div
           className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200"
@@ -148,7 +138,9 @@ export default async function CustomerBranchesPage({
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {data.results.map((branch) => {
             const logo = mediaUrl(branch.logo);
-            const enabled = branch.id === eligibleId;
+            const covered = coveredById.get(branch.id) ?? false;
+            const isNearest = branch.id === nearestId && covered;
+            const enabled = covered;
             const inner = (
               <>
                 <div className="relative flex h-28 items-center justify-center bg-gradient-to-br from-ink-900 to-ink-950">
@@ -157,8 +149,8 @@ export default async function CustomerBranchesPage({
                   ) : (
                     <span className="text-4xl">🏪</span>
                   )}
-                  {enabled ? (
-                    <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white" data-testid="branch-nearest-badge">
+                  {isNearest ? (
+                    <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm" data-testid="branch-nearest-badge">
                       {t("nearestBranch.nearestBadge")}
                     </span>
                   ) : null}
@@ -166,8 +158,6 @@ export default async function CustomerBranchesPage({
                 <div className="p-4">
                   <h3 className={cn("font-semibold", enabled ? "text-fg-base group-hover:text-brand-600" : "text-fg-muted")}>{branch.name}</h3>
                   <p className="mt-0.5 line-clamp-1 text-sm text-fg-muted">📍 {branch.address}</p>
-                  {/* PHASE P — real, database-backed details for every branch:
-                      brand, hours, distance and whether delivery is possible. */}
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-fg-subtle">
                     <span data-testid="branch-brand">{branch.brand_type}</span>
                     <span>📞 {branch.phone}</span>
@@ -187,7 +177,7 @@ export default async function CustomerBranchesPage({
                         : t("outOfZone.distanceUnknown")}
                     </span>
                     <span
-                      className={enabled ? "font-medium text-emerald-600" : "font-medium text-amber-600 dark:text-amber-400"}
+                      className={enabled ? "font-semibold text-emerald-600 dark:text-emerald-400" : "font-medium text-amber-600 dark:text-amber-400"}
                       data-testid="branch-delivery-availability"
                     >
                       {enabled ? t("outOfZone.deliveryAvailable") : t("outOfZone.deliveryUnavailable")}
@@ -198,8 +188,6 @@ export default async function CustomerBranchesPage({
                       {t("nearestBranch.disabledNote")}
                     </p>
                   ) : null}
-                  {/* PHASE F — map where one is configured, useful detail where
-                      it is not. Distance and coverage are the SERVER's. */}
                   <BranchLocationPanel
                     branchName={branch.name}
                     address={branch.address}
@@ -215,7 +203,7 @@ export default async function CustomerBranchesPage({
                 key={branch.id}
                 href={`/customer/branches/${branch.id}/menu`}
                 data-testid="branch-enabled"
-                className="group overflow-hidden rounded-2xl border border-emerald-300 bg-surface-card shadow-card transition-shadow hover:shadow-card-hover"
+                className="group overflow-hidden rounded-2xl border border-emerald-400/80 bg-surface-card shadow-card transition-all hover:border-emerald-500 hover:shadow-card-hover"
               >
                 {inner}
               </Link>

@@ -150,21 +150,30 @@ export interface BranchEligibility {
   distance_km: number | null;
   eligible: boolean;
   covered: boolean;
+  is_nearest?: boolean;
 }
 
 /**
- * Determine the customer's nearest ELIGIBLE branch server-side (req #20). A
- * branch is eligible when it is active + not archived, has coordinates, and the
- * trusted point falls inside its coverage (radius / active zones). The nearest
- * covered branch is the enabled one; every other branch is returned disabled.
- * Never trusts a client-supplied branch id.
+ * Checks whether a specific branch is currently active, unarchived, and covers
+ * the authenticated customer's trusted location.
  */
+export async function isBranchCoveredForCustomer(userId: number, branchId: number): Promise<boolean> {
+  const branch = await prisma.branch.findFirst({
+    where: { id: branchId, isActive: true, isArchived: false },
+  });
+  if (!branch || branch.latitude == null || branch.longitude == null) return false;
+  const point = await trustedCustomerPoint(userId);
+  if (!point) return false;
+  const zones = await prisma.branchDeliveryZone.findMany({
+    where: { branchId, isActive: true },
+  });
+  return coverageFor(branch, zones, point).covered;
+}
+
 /**
- * The nearest ELIGIBLE branch for an arbitrary trusted point — the shared core of
- * every nearest-branch decision in the app. A branch qualifies when it is active,
- * not archived, has coordinates, and covers the point (radius or an active zone).
- * Ties resolve by shortest distance, then lowest branch id, so the same point
- * always yields the same branch.
+ * Determine the customer's ELIGIBLE branches server-side.
+ * Every branch whose radius or active zones cover the customer's trusted location
+ * is marked eligible (Foodpanda model). The closest covered branch is tagged as is_nearest.
  */
 export async function nearestEligibleBranchForPoint(
   point: LatLng,
@@ -204,7 +213,7 @@ export async function nearestEligibleBranch(userId: number): Promise<{
   const results: (BranchEligibility & { _dist: number | null })[] = [];
   for (const b of branches) {
     if (!point || b.latitude == null || b.longitude == null) {
-      results.push({ id: b.id, name: b.name, distance_km: null, eligible: false, covered: false, _dist: null });
+      results.push({ id: b.id, name: b.name, distance_km: null, eligible: false, covered: false, is_nearest: false, _dist: null });
       continue;
     }
     const zones = await prisma.branchDeliveryZone.findMany({ where: { branchId: b.id, isActive: true } });
@@ -214,16 +223,14 @@ export async function nearestEligibleBranch(userId: number): Promise<{
       id: b.id,
       name: b.name,
       distance_km: roundKm(dist),
-      eligible: false,
+      eligible: cov.covered,
       covered: cov.covered,
+      is_nearest: false,
       _dist: dist,
     });
   }
 
-  // Nearest among covered branches becomes the single eligible branch.
-  // Deterministic: shortest distance, then the lowest stable database id. Two
-  // branches at an identical distance must resolve the same way on every
-  // request, or a customer's catalogue would flicker between them.
+  // Nearest among covered branches
   const covered = results
     .filter((r) => r.covered && r._dist != null)
     .sort((a, b) => a._dist! - b._dist! || a.id - b.id);
@@ -233,7 +240,8 @@ export async function nearestEligibleBranch(userId: number): Promise<{
     name: r.name,
     distance_km: r.distance_km,
     covered: r.covered,
-    eligible: r.id === nearestId,
+    eligible: r.covered,
+    is_nearest: r.id === nearestId,
   }));
   return {
     point: point ? { lat: point.lat, lng: point.lng } : null,

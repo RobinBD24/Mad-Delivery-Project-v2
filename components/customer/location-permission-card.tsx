@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 import { Icon } from "@/components/layout/icons";
 import { Alert } from "@/components/ui/alert";
@@ -33,17 +34,17 @@ type Phase =
   | "error";
 
 /**
- * req #12/#21 — customer GPS permission + status card. Explains what the live
- * location is used for, requests it via the Geolocation API, and handles every
- * outcome (granted / denied / unavailable / timeout / low-accuracy / unsupported)
- * with a retry. Saves through POST /api/customer/location, which is kept SEPARATE
- * from saved addresses and never overwrites the default address.
+ * Customer GPS permission + status card. Automatically requests live location
+ * on mount (with browser permission) or via button, saves to /api/customer/location,
+ * and refreshes the page to instantly activate nearby branches.
  */
 export function LocationPermissionCard({ initial }: { initial: LocationStatus }) {
+  const router = useRouter();
   const { t, fmt } = useTranslation();
   const [status, setStatus] = useState<LocationStatus>(initial);
   const [phase, setPhase] = useState<Phase>(initial.lat != null ? "saved" : "idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const autoRequested = useRef(false);
 
   const hasLocation = status.lat != null && status.lng != null;
   const busy = phase === "requesting" || phase === "saving";
@@ -63,14 +64,9 @@ export function LocationPermissionCard({ initial }: { initial: LocationStatus })
           const res = await fetch("/api/customer/location", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            // PHASE E — send when the browser captured the fix so the server can
-            // refuse a stale/replayed reading rather than store it as current.
             body: JSON.stringify({ lat: latitude, lng: longitude, accuracy, captured_at: pos.timestamp }),
           });
           if (!res.ok) {
-            // No user-editable field exists here (the coordinates come from the
-            // browser), so the server's message is shown at form level. Raw
-            // payloads are never surfaced.
             const body = await res.json().catch(() => null);
             setSaveError(parseFieldErrors(body, t("location.errSave")).formError);
             setPhase("error");
@@ -78,6 +74,7 @@ export function LocationPermissionCard({ initial }: { initial: LocationStatus })
           }
           setStatus({ lat: latitude, lng: longitude, accuracy, updatedAt: new Date().toISOString() });
           setPhase(accuracy != null && accuracy > LOW_ACCURACY_M ? "lowaccuracy" : "saved");
+          router.refresh();
         } catch {
           setSaveError(t("location.errSave"));
           setPhase("error");
@@ -92,6 +89,14 @@ export function LocationPermissionCard({ initial }: { initial: LocationStatus })
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
     );
   }
+
+  // Automatically request location when customer lands if not yet set
+  useEffect(() => {
+    if (!autoRequested.current && (!initial.lat || !initial.lng)) {
+      autoRequested.current = true;
+      request();
+    }
+  }, [initial.lat, initial.lng]);
 
   // Map the terminal error phases to a translated message + tone.
   const problem: { tone: "error" | "warning"; message: string } | null =

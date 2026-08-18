@@ -29,12 +29,10 @@ export default async function BranchMenuPage({
   const { id } = await params;
   const { cat, search } = await searchParams;
 
-  // A customer may browse only their OWN nearest eligible branch. The branches
-  // list already renders every other branch disabled, but that is presentation —
-  // typing the id straight into the URL has to be refused too, and the product
-  // API underneath is branch-scoped for this role regardless.
-  const allowedBranchId = await resolvedBranchIdFor(me.id);
-  if (allowedBranchId == null || allowedBranchId !== Number(id)) notFound();
+  // A customer may browse any branch that covers their trusted location (Foodpanda model).
+  const branchIdNum = Number(id);
+  const allowedBranchId = await resolvedBranchIdFor(me.id, branchIdNum);
+  if (allowedBranchId == null || allowedBranchId !== branchIdNum) notFound();
 
   let branch: Branch;
   try {

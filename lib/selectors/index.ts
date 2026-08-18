@@ -222,13 +222,9 @@ export async function categoriesForUser(user: User, branchId?: number, search?: 
     // Filtered view = the branch's own categories + globals; unfiltered = all.
     where = branchId ? { OR: [{ branchId }, { branchId: null }] } : {};
   } else if (user.role === "customer") {
-    // A customer's category list is scoped to their SERVER-RESOLVED branch, for
-    // the same reason their product list is: the `branch` query parameter is
-    // caller-supplied, and honouring it would expose another branch's category
-    // names and let the homepage's category filter reach across branches.
-    // Globals stay in scope — but the products under them are branch-scoped by
-    // productsForUser, so a global category never mixes two branches' products.
-    const resolved = await resolvedBranchIdFor(user.id);
+    // A customer's category list is scoped to their SERVER-RESOLVED covered branch.
+    // If a branchId is requested (e.g. menu page), it is verified for coverage.
+    const resolved = await resolvedBranchIdFor(user.id, branchId);
     if (resolved == null) return [];
     where = { isActive: true, OR: [{ branchId: resolved, branch: visibleBranch }, { branchId: null }] };
   } else {
@@ -270,20 +266,8 @@ export async function productsForUser(
   } else if (user.role === "super_admin") {
     where = { ...notDeleted, ...(branchId ? { branchId } : {}), ...brandFilter };
   } else {
-    // req #9 — customer visibility is NOT defined here. It comes from the one
-    // shared definition in lib/services/product-eligibility, which the
-    // storefront, the menu, search, product detail, the cart and order creation
-    // all compose. Re-stating the rules locally is exactly how this list and
-    // the order pipeline drifted apart.
-    //
-    // BRANCH SCOPE IS SERVER-RESOLVED. A customer orders from exactly one
-    // nearest eligible branch, computed from their own trusted coordinates, so
-    // the caller's `branchId` argument is IGNORED for this role: it arrives from
-    // a query string (`?branch=`/`?branch_id=`) and would otherwise let anyone
-    // read another branch's catalogue by editing the URL. With no resolvable
-    // branch there is nothing this customer may order, and the honest answer is
-    // an empty list rather than every branch's products.
-    const resolved = await resolvedBranchIdFor(user.id);
+    // BRANCH SCOPE IS SERVER-RESOLVED. Verifies that the requested branch covers the customer's coordinates.
+    const resolved = await resolvedBranchIdFor(user.id, branchId);
     if (resolved == null) return [];
     where = customerProductWhere({ branchId: resolved, brand });
   }

@@ -43,20 +43,18 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
         variations: { orderBy: { sortOrder: "asc" } },
       },
     });
-  } else {
-    // A direct product URL is held to exactly the rules the listings use — the
-    // shared customer eligibility clause, plus the customer's SERVER-RESOLVED
-    // branch. Without the branch scope a customer could read (and then try to
-    // order) any other branch's product simply by guessing its id. No resolvable
-    // branch → nothing is readable.
-    const branchId = await resolvedBranchIdFor(me.id);
-    if (branchId == null) throw notFound(sk("errors.catalog.productNotFound"));
+    const candidate = await prisma.product.findUnique({
+      where: { id },
+      select: { branchId: true },
+    });
+    if (!candidate) throw notFound(sk("errors.catalog.productNotFound"));
+    const branchId = await resolvedBranchIdFor(me.id, candidate.branchId);
+    if (branchId == null || branchId !== candidate.branchId) throw notFound(sk("errors.catalog.productNotFound"));
     const row = await prisma.product.findFirst({
       where: customerProductWhere({ ids: [id], branchId }),
       include: CUSTOMER_PRODUCT_INCLUDE,
     });
     product = row && isProductOrderable(row) ? row : null;
-  }
   if (!product) throw notFound(sk("errors.catalog.productNotFound"));
   return json(serializeProduct(product));
 });
