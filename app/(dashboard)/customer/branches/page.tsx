@@ -141,8 +141,12 @@ export default async function CustomerBranchesPage({
             const covered = coveredById.get(branch.id) ?? false;
             const isNearest = branch.id === nearestId && covered;
             const enabled = covered;
-            const inner = (
-              <>
+            return enabled ? (
+              <div
+                key={branch.id}
+                data-testid="branch-enabled"
+                className="group flex flex-col overflow-hidden rounded-2xl border border-emerald-400/80 bg-surface-card shadow-card transition-all hover:border-emerald-500 hover:shadow-card-hover"
+              >
                 <div className="relative flex h-28 items-center justify-center bg-gradient-to-br from-ink-900 to-ink-950">
                   {logo ? (
                     <Image src={logo} alt={branch.name} width={64} height={64} className="size-16 rounded-2xl object-cover" />
@@ -155,8 +159,10 @@ export default async function CustomerBranchesPage({
                     </span>
                   ) : null}
                 </div>
-                <div className="p-4">
-                  <h3 className={cn("font-semibold", enabled ? "text-fg-base group-hover:text-brand-600" : "text-fg-muted")}>{branch.name}</h3>
+                <div className="flex flex-1 flex-col p-4">
+                  <Link href={`/customer/branches/${branch.id}/menu`} className="group/title">
+                    <h3 className="font-semibold text-fg-base transition-colors group-hover/title:text-brand-600 group-hover/title:underline">{branch.name}</h3>
+                  </Link>
                   <p className="mt-0.5 line-clamp-1 text-sm text-fg-muted">📍 {branch.address}</p>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-fg-subtle">
                     <span data-testid="branch-brand">{branch.brand_type}</span>
@@ -177,17 +183,78 @@ export default async function CustomerBranchesPage({
                         : t("outOfZone.distanceUnknown")}
                     </span>
                     <span
-                      className={enabled ? "font-semibold text-emerald-600 dark:text-emerald-400" : "font-medium text-amber-600 dark:text-amber-400"}
+                      className="font-semibold text-emerald-600 dark:text-emerald-400"
                       data-testid="branch-delivery-availability"
                     >
-                      {enabled ? t("outOfZone.deliveryAvailable") : t("outOfZone.deliveryUnavailable")}
+                      {t("outOfZone.deliveryAvailable")}
                     </span>
                   </div>
-                  {!enabled ? (
-                    <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400" data-testid="branch-disabled-note">
-                      {t("nearestBranch.disabledNote")}
-                    </p>
-                  ) : null}
+
+                  <BranchLocationPanel
+                    branchName={branch.name}
+                    address={branch.address}
+                    distanceKm={distanceById.get(branch.id) ?? null}
+                    covered={enabled}
+                    mapsKey={mapsKey}
+                  />
+
+                  <div className="mt-3 pt-1">
+                    <ButtonLink
+                      href={`/customer/branches/${branch.id}/menu`}
+                      className="w-full"
+                      size="sm"
+                    >
+                      {t("common.view")} →
+                    </ButtonLink>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                key={branch.id}
+                aria-disabled="true"
+                tabIndex={-1}
+                data-testid="branch-disabled"
+                className="flex flex-col overflow-hidden rounded-2xl border border-border-base/80 bg-surface-card opacity-60 shadow-card"
+              >
+                <div className="relative flex h-28 items-center justify-center bg-gradient-to-br from-ink-900 to-ink-950">
+                  {logo ? (
+                    <Image src={logo} alt={branch.name} width={64} height={64} className="size-16 rounded-2xl object-cover" />
+                  ) : (
+                    <span className="text-4xl">🏪</span>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col p-4">
+                  <h3 className="font-semibold text-fg-muted">{branch.name}</h3>
+                  <p className="mt-0.5 line-clamp-1 text-sm text-fg-muted">📍 {branch.address}</p>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-fg-subtle">
+                    <span data-testid="branch-brand">{branch.brand_type}</span>
+                    <span>📞 {branch.phone}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-fg-subtle">
+                    <span data-testid="branch-hours">
+                      {branch.opening_time && branch.closing_time
+                        ? `🕒 ${branch.opening_time} – ${branch.closing_time}`
+                        : t("outOfZone.hoursUnknown")}
+                    </span>
+                    <span>{t("customer.deliveryRadius", { km: fmt.num(branch.delivery_radius_km) })}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
+                    <span className="text-fg-subtle" data-testid="branch-distance">
+                      {distanceById.get(branch.id) != null
+                        ? t("outOfZone.distanceKm", { km: fmt.num(distanceById.get(branch.id)!) })
+                        : t("outOfZone.distanceUnknown")}
+                    </span>
+                    <span
+                      className="font-medium text-amber-600 dark:text-amber-400"
+                      data-testid="branch-delivery-availability"
+                    >
+                      {t("outOfZone.deliveryUnavailable")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400" data-testid="branch-disabled-note">
+                    {t("nearestBranch.disabledNote")}
+                  </p>
                   <BranchLocationPanel
                     branchName={branch.name}
                     address={branch.address}
@@ -196,26 +263,6 @@ export default async function CustomerBranchesPage({
                     mapsKey={mapsKey}
                   />
                 </div>
-              </>
-            );
-            return enabled ? (
-              <Link
-                key={branch.id}
-                href={`/customer/branches/${branch.id}/menu`}
-                data-testid="branch-enabled"
-                className="group overflow-hidden rounded-2xl border border-emerald-400/80 bg-surface-card shadow-card transition-all hover:border-emerald-500 hover:shadow-card-hover"
-              >
-                {inner}
-              </Link>
-            ) : (
-              <div
-                key={branch.id}
-                aria-disabled="true"
-                tabIndex={-1}
-                data-testid="branch-disabled"
-                className="pointer-events-none cursor-not-allowed select-none overflow-hidden rounded-2xl border border-border-base/80 bg-surface-card opacity-60 shadow-card"
-              >
-                {inner}
               </div>
             );
           })}
