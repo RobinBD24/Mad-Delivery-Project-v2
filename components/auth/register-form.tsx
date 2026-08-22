@@ -95,8 +95,8 @@ export function RegisterForm({
       </Field>
 
       {withRiderFields ? (
-        <fieldset className="space-y-4 rounded-2xl border border-slate-200 p-4">
-          <legend className="px-2 text-sm font-semibold text-slate-700">{t("register.riderInfo")}</legend>
+        <fieldset className="space-y-4 rounded-2xl border border-border-base p-4">
+          <legend className="px-2 text-sm font-semibold text-fg-base">{t("register.riderInfo")}</legend>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("register.nidNumber")} required error={errors.nid_number}>
               <Input name="nid_number" required aria-invalid={!!errors.nid_number} placeholder={t("register.nidPlaceholder")} />

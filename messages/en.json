@@ -1516,6 +1516,7 @@
       "riderNotOnBranchDuty": "The rider is not on an active duty session for this branch.",
       "invalidCoordinates": "Invalid coordinates.",
       "noEligibleBranch": "No eligible branch is available for delivery to this location.",
+      "branchClosed": "This branch is closed right now. Please order during its opening hours.",
       "variationTypeRequired": "Please choose Thick or Thin for this item.",
       "variationTypeNotAvailable": "That crust is not available for this product.",
       "rejectionReasonRequired": "A reason is required when rejecting or cancelling an order.",
@@ -3182,7 +3183,9 @@
     "explainerNoLocation": "Set your delivery location to see which branch can serve you.",
     "setLocation": "Set location",
     "nearestBadge": "Nearest",
-    "disabledNote": "Not your nearest branch — ordering is locked to the nearest eligible one."
+    "disabledNote": "Not your nearest branch — ordering is locked to the nearest eligible one.",
+    "opensAt": "Opens at {time}",
+    "finding": "Finding restaurants near you…"
   },
   "location": {
     "title": "Live location",
@@ -3376,7 +3379,9 @@
     "distanceUnknown": "Distance unknown",
     "deliveryAvailable": "Delivery available",
     "deliveryUnavailable": "Delivery unavailable here",
-    "hoursUnknown": "Hours not set"
+    "hoursUnknown": "Hours not set",
+    "allClosedTitle": "Your nearest branch is closed right now",
+    "allClosedBody": "{branch} opens at {time}. You can browse the menu now and order once it reopens."
   },
   "maps": {
     "directions": "Get directions",

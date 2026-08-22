@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" next dev --webpack",
-    "build": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" next build --webpack",
-    "start": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" next start",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
     "lint": "eslint",
-    "seed": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" tsx prisma/seed.ts",
+    "seed": "tsx prisma/seed.ts",
     "images:convert": "node scripts/convert-images-to-webp.mjs",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -20,7 +20,7 @@
     "test:e2e:report": "playwright show-report"
   },
   "prisma": {
-    "seed": "LD_LIBRARY_PATH=\"./node_modules/sharp/node_modules/@img/sharp-libvips-linux-x64/lib:$LD_LIBRARY_PATH\" tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.3.1",

@@ -9,10 +9,10 @@ import { getJSON } from "@/lib/api/client";
 import { requireRole } from "@/lib/auth/session";
 import { getSessionUser } from "@/lib/auth/current-user";
 import { getT } from "@/lib/i18n/server";
-import { mediaUrl, cn } from "@/lib/utils";
+import { mediaUrl } from "@/lib/utils";
 import { nearestEligibleBranch, customerLocationStatus } from "@/lib/services/customer-location";
 import { BranchLocationPanel } from "@/components/customer/branch-location-panel";
-import { LocationPermissionCard } from "@/components/customer/location-permission-card";
+import { BranchesLocationGate } from "@/components/customer/branches-location-gate";
 import type { Branch, Paginated } from "@/types";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -51,26 +51,40 @@ export default async function CustomerBranchesPage({
   const nearestId = nearest.nearest?.id ?? null;
   const distanceById = new Map(nearest.branches.map((b) => [b.id, b.distance_km]));
   const coveredById = new Map(nearest.branches.map((b) => [b.id, b.covered]));
+  // Open-now is decided SERVER-SIDE (lib/services/branch-hours.ts, Asia/Dhaka) —
+  // the client clock is never trusted for this (§20). A covered branch that is
+  // closed right now is shown but not orderable, with an "Opens at …" note.
+  const openById = new Map(nearest.branches.map((b) => [b.id, b.open_now]));
+  const opensAtById = new Map(nearest.branches.map((b) => [b.id, b.opens_at]));
   const hasCoveredBranches = nearest.branches.some((b) => b.covered);
-  // Out of zone = we DO know where they are, and nothing covers it.
+  // Out of zone = we DO know where they are, and NOTHING covers it. Coverage —
+  // not opening hours — defines this: a covered-but-closed area is not out of zone
+  // (that is the separate all-closed banner, owned by the gate below).
   const outOfZone = Boolean(nearest.point) && !hasCoveredBranches;
 
   return (
     <>
       <PageHeader title={t("customer.restaurantsTitle")} subtitle={t("customer.restaurantsSubtitle")} />
 
-      {!nearest.point ? (
-        <div className="mb-4" data-testid="location-setup">
-          <LocationPermissionCard
-            initial={{
-              lat: locationStatus.lat,
-              lng: locationStatus.lng,
-              accuracy: locationStatus.accuracy,
-              updatedAt: locationStatus.updatedAt,
-            }}
-          />
-        </div>
-      ) : null}
+      {/* Location region (Gap #2): permission card when there is no point, a
+          "Finding restaurants near you…" state while a stale saved address is
+          re-checked with live GPS, and the truthful out-of-zone / all-closed
+          banners with a WORKING retry. The explainer strip below stays server-
+          rendered and always visible. */}
+      <BranchesLocationGate
+        hasPoint={Boolean(nearest.point)}
+        pointSource={nearest.pointSource}
+        outOfZone={outOfZone}
+        allCoveredClosed={nearest.allCoveredClosed}
+        nearestName={nearest.nearest?.name ?? null}
+        opensAt={nearest.nearest?.opens_at ?? null}
+        locationInitial={{
+          lat: locationStatus.lat,
+          lng: locationStatus.lng,
+          accuracy: locationStatus.accuracy,
+          updatedAt: locationStatus.updatedAt,
+        }}
+      />
 
       {/* Branch search (server-side GET form) */}
       <form method="GET" noValidate className="mb-4 flex flex-wrap items-center gap-2" data-testid="branch-search-form">
@@ -105,24 +119,8 @@ export default async function CustomerBranchesPage({
         ) : null}
       </div>
 
-      {/* Outside every branch's coverage banner */}
-      {outOfZone ? (
-        <div
-          className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200"
-          data-testid="out-of-zone-banner"
-        >
-          <p className="font-medium">{t("outOfZone.title")}</p>
-          <p className="mt-0.5">{t("outOfZone.body")}</p>
-          <span className="mt-2 inline-flex flex-wrap gap-2">
-            <ButtonLink href="/customer/addresses" size="sm" variant="outline" data-testid="out-of-zone-update-address">
-              {t("outOfZone.updateAddress")}
-            </ButtonLink>
-            <ButtonLink href="/customer/branches" size="sm" variant="outline" data-testid="out-of-zone-retry">
-              {t("outOfZone.retry")}
-            </ButtonLink>
-          </span>
-        </div>
-      ) : null}
+      {/* The out-of-zone / all-closed banners now live in BranchesLocationGate
+          above, so the detecting state can suppress a premature banner (§16). */}
 
       {data.results.length === 0 ? (
         search ? (
@@ -139,8 +137,12 @@ export default async function CustomerBranchesPage({
           {data.results.map((branch) => {
             const logo = mediaUrl(branch.logo);
             const covered = coveredById.get(branch.id) ?? false;
-            const isNearest = branch.id === nearestId && covered;
-            const enabled = covered;
+            // Open-now (server-decided) gates orderability alongside coverage: a
+            // covered branch that is closed right now stays visible but disabled,
+            // with an "Opens at …" note instead of the generic not-nearest one.
+            const open = openById.get(branch.id) ?? true;
+            const enabled = covered && open;
+            const isNearest = branch.id === nearestId && enabled;
             return enabled ? (
               <div
                 key={branch.id}
@@ -194,7 +196,7 @@ export default async function CustomerBranchesPage({
                     branchName={branch.name}
                     address={branch.address}
                     distanceKm={distanceById.get(branch.id) ?? null}
-                    covered={enabled}
+                    covered={covered}
                     mapsKey={mapsKey}
                   />
 
@@ -253,13 +255,15 @@ export default async function CustomerBranchesPage({
                     </span>
                   </div>
                   <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400" data-testid="branch-disabled-note">
-                    {t("nearestBranch.disabledNote")}
+                    {covered && !open
+                      ? t("nearestBranch.opensAt", { time: opensAtById.get(branch.id) ?? branch.opening_time ?? "" })
+                      : t("nearestBranch.disabledNote")}
                   </p>
                   <BranchLocationPanel
                     branchName={branch.name}
                     address={branch.address}
                     distanceKm={distanceById.get(branch.id) ?? null}
-                    covered={enabled}
+                    covered={covered}
                     mapsKey={mapsKey}
                   />
                 </div>

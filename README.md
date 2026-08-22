@@ -44,7 +44,9 @@ Build / quality checks:
 
 ```bash
 npm run lint
+
 npm run build
+npm run start
 ```
 
 ## Environment variables
@@ -75,7 +77,7 @@ Copy `.env.example` to **both** `.env` (Prisma CLI) and `.env.local` (Next.js ru
 
 ## Demo / seed accounts
 
-Run `npm run seed`. **Password for every account: `Admin12345@##`**
+Run `npm run seed`. **Password for every account: `		Admin12345@##	`**
 
 | Username | Role |
 | --- | --- |

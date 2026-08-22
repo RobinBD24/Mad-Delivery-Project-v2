@@ -596,7 +596,8 @@
   padding: 46px 46px;
   display: flex;
   align-items: center;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
+  backdrop-filter: blur(12px);
 }
 
 .auth-form {
@@ -644,8 +645,8 @@
   font-family: var(--font-body);
   font-size: 14.5px;
   color: var(--ink);
-  background: color-mix(in srgb, var(--surface) 65%, transparent);
-  border: 1.5px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--ink) 14%, transparent);
   border-radius: var(--radius-md);
   outline: none;
   transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease), background 0.25s var(--ease);
@@ -992,7 +993,7 @@
   padding: 13px;
   border-radius: var(--radius-md);
   border: 1.5px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
   color: var(--ink);
   font-weight: 600;
   font-size: 13.5px;
@@ -1056,6 +1057,7 @@
 }
 
 [data-theme="dark"] .toast {
+  background: #f5f1ec;
   color: var(--night-0);
 }
 

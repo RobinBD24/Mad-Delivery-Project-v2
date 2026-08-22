@@ -2,7 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/db";
 import { coverageFor } from "@/lib/services/delivery";
-import { isBranchCoveredForCustomer, nearestEligibleBranch, trustedCustomerPointDetailed } from "@/lib/services/customer-location";
+import { isBranchCoveredForCustomer, nearestEligibleBranch } from "@/lib/services/customer-location";
 
 export { isBranchCoveredForCustomer };
 
@@ -38,6 +38,10 @@ export interface CustomerBranchContext {
   deliveryFee: number | null;
   /** Whether the point came from a GPS fix or the default saved address. */
   pointSource: "gps" | "address" | null;
+  /** Whether the resolved branch can take an order right now (active + within hours). */
+  open: boolean;
+  /** Opening time ("HH:MM") to show when the branch is currently closed; null otherwise. */
+  opensAt: string | null;
 }
 
 const EMPTY: CustomerBranchContext = {
@@ -47,6 +51,8 @@ const EMPTY: CustomerBranchContext = {
   distanceKm: null,
   deliveryFee: null,
   pointSource: null,
+  open: false,
+  opensAt: null,
 };
 
 /**
@@ -87,6 +93,13 @@ export async function resolveCustomerBranch(userId: number, preferredBranchId?: 
   });
   const coverage = coverageFor(branch, zones, nearest.point);
 
+  // Open-now state comes from the SAME server decision used everywhere else
+  // (nearestEligibleBranch already computed it per branch). Surfaced so the
+  // homepage strip can warn "Opens at …" before a cart is built for a branch
+  // that is covered but closed right now.
+  const elig = nearest.branches.find((b) => b.id === targetBranchId) ?? null;
+  const open = elig?.open_now ?? true;
+
   return {
     state: "ok",
     branchId: branch.id,
@@ -101,6 +114,8 @@ export async function resolveCustomerBranch(userId: number, preferredBranchId?: 
     distanceKm: targetDistance,
     deliveryFee: coverage.covered ? coverage.fee : null,
     pointSource: nearest.pointSource,
+    open,
+    opensAt: open ? null : elig?.opens_at ?? null,
   };
 }
 

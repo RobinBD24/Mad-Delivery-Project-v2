@@ -43,6 +43,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
         variations: { orderBy: { sortOrder: "asc" } },
       },
     });
+  } else {
     const candidate = await prisma.product.findUnique({
       where: { id },
       select: { branchId: true },
@@ -55,6 +56,7 @@ export const GET = handle(async (_req: Request, ctx: Ctx) => {
       include: CUSTOMER_PRODUCT_INCLUDE,
     });
     product = row && isProductOrderable(row) ? row : null;
+  }
   if (!product) throw notFound(sk("errors.catalog.productNotFound"));
   return json(serializeProduct(product));
 });

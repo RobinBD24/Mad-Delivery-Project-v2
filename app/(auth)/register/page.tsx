@@ -23,7 +23,7 @@ export default async function RegisterPage() {
       footer={
         <>
           {t("auth.haveAccountQ")}{" "}
-          <Link href="/login" className="font-semibold text-brand-600 hover:underline">
+          <Link href="/login" className="font-semibold text-brand-500 transition-colors hover:text-brand-400 hover:underline">
             {t("auth.loginNow")}
           </Link>
         </>

@@ -18,6 +18,7 @@ import { validateCoupon } from "@/lib/services/marketing";
 import { allowedCrustChoices } from "@/lib/constants/enums";
 import { coverageFor } from "@/lib/services/delivery";
 import { haversineKm, isValidLatLng } from "@/lib/services/geo";
+import { isBranchOpenNow } from "@/lib/services/branch-hours";
 import { isReceiveConfirmed } from "@/lib/services/rider-duty";
 import { nextOrderNumber } from "@/lib/services/order-number";
 import { customerProductWhere } from "@/lib/services/product-eligibility";
@@ -88,14 +89,26 @@ export async function resolveDeliveryBranch(
     where: { id: { in: servingBranchIds }, isActive: true, isArchived: false },
   });
   const eligible: { branch: (typeof candidates)[number]; dist: number }[] = [];
+  // A branch that covers the point but is CLOSED right now is tracked separately
+  // so we can return an accurate "branch closed" error instead of the generic
+  // "no branch covers you" (§17). Hours are enforced server-side — the client's
+  // open/closed chip is display-only and never trusted here (§20).
+  let anyCoveredButClosed = false;
   for (const b of candidates) {
     if (b.latitude == null || b.longitude == null) continue;
     const zones = await prisma.branchDeliveryZone.findMany({ where: { branchId: b.id, isActive: true } });
     if (!coverageFor(b, zones, coords).covered) continue;
+    if (!isBranchOpenNow(b).orderable) {
+      anyCoveredButClosed = true;
+      continue;
+    }
     eligible.push({ branch: b, dist: haversineKm({ lat: Number(b.latitude), lng: Number(b.longitude) }, coords) });
   }
   eligible.sort((a, z) => a.dist - z.dist || a.branch.id - z.branch.id);
-  if (eligible.length === 0) throw validationError({ delivery_address: sk("errors.orders.noEligibleBranch") });
+  if (eligible.length === 0) {
+    if (anyCoveredButClosed) throw validationError({ branch_id: sk("errors.orders.branchClosed") });
+    throw validationError({ delivery_address: sk("errors.orders.noEligibleBranch") });
+  }
   return eligible[0].branch;
 }
 
@@ -143,6 +156,8 @@ async function resolveBranchForCart(input: {
       where: { id: input.branchId, isActive: true, isArchived: false },
     });
     if (!picked) throw validationError({ branch_id: sk("errors.orders.branchNotFoundOrClosed") });
+    // A branch outside its opening hours cannot take a pickup order either (§17).
+    if (!isBranchOpenNow(picked).orderable) throw validationError({ branch_id: sk("errors.orders.branchClosed") });
     if (!picked.pickupEnabled) throw validationError({ fulfillment_type: sk("errors.orders.pickupUnavailable") });
     return { branch: picked, lat: null as number | null, lng: null as number | null };
   }

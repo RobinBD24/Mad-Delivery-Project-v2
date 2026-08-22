@@ -1,11 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 import { useTranslation } from "@/lib/i18n/use-translation";
-import { parseFieldErrors } from "@/lib/validation/contract";
+import { useLocationRequest } from "@/lib/hooks/use-location-request";
 
 export interface BranchBarContext {
   state: "ok" | "no-location" | "out-of-zone";
@@ -15,6 +13,10 @@ export interface BranchBarContext {
   deliveryFee: number | null;
   pickupEnabled: boolean;
   prepTimeMinutes: number | null;
+  /** Whether the resolved branch can take an order right now. */
+  open: boolean;
+  /** Opening time ("HH:MM") shown when the branch is currently closed. */
+  opensAt: string | null;
 }
 
 /**
@@ -32,58 +34,24 @@ export interface BranchBarContext {
  */
 export function BranchBar({ context }: { context: BranchBarContext }) {
   const { t, fmt } = useTranslation();
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Same shared live-location flow the location card uses — no second location
+  // system, no client-side distance maths. The server re-derives the nearest
+  // branch on the refresh the hook performs.
+  const { request, phase, busy, saveError } = useLocationRequest();
 
-  /**
-   * Requests a fix and saves it through the SAME endpoint the customer
-   * location card uses — no second location system, no client-side distance
-   * maths. The server re-derives the nearest branch on the refresh.
-   */
-  function useCurrentLocation() {
-    setError(null);
-    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
-      setError(t("location.errUnsupported"));
-      return;
-    }
-    setBusy(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const res = await fetch("/api/customer/location", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy,
-              captured_at: pos.timestamp,
-            }),
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            setError(parseFieldErrors(body, t("location.errSave")).formError);
-            return;
-          }
-          // Server re-resolves the branch and the catalogue for this request.
-          router.refresh();
-        } catch {
-          setError(t("location.errSave"));
-        } finally {
-          setBusy(false);
-        }
-      },
-      (err) => {
-        setBusy(false);
-        // A refusal is not an error state to nag about — the saved default
-        // address is the documented fallback, so say so and offer it.
-        if (err.code === err.PERMISSION_DENIED) setError(t("nearestHome.deniedUseAddress"));
-        else setError(t("location.errUnavailable"));
-      },
-      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
-    );
-  }
+  // A refusal is not an error state to nag about — the saved default address is
+  // the documented fallback, so point at it; other failures surface a short
+  // inline message.
+  const error =
+    phase === "denied"
+      ? t("nearestHome.deniedUseAddress")
+      : phase === "unsupported"
+        ? t("location.errUnsupported")
+        : phase === "unavailable" || phase === "timeout"
+          ? t("location.errUnavailable")
+          : phase === "error"
+            ? saveError ?? t("location.errUnavailable")
+            : null;
 
   const action =
     "rounded-lg border border-white/15 px-3 py-1.5 text-[0.78rem] font-semibold text-white transition-colors hover:border-brand-500 hover:bg-white/5 disabled:opacity-60";
@@ -110,6 +78,14 @@ export function BranchBar({ context }: { context: BranchBarContext }) {
                 {t(`brandType.${context.brandType}`)}
               </span>
             ) : null}
+            {!context.open && context.opensAt ? (
+              <span
+                className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[0.72rem] font-semibold text-amber-300"
+                data-testid="home-branch-closed"
+              >
+                🕒 {t("nearestBranch.opensAt", { time: context.opensAt })}
+              </span>
+            ) : null}
             {context.distanceKm != null ? (
               <span className="text-[#a0a0b0]" data-testid="home-branch-distance">
                 {t("nearestHome.distance", { km: fmt.num(context.distanceKm) })}
@@ -126,7 +102,7 @@ export function BranchBar({ context }: { context: BranchBarContext }) {
               </span>
             ) : null}
             <span className="ms-auto flex flex-wrap items-center gap-2">
-              <button type="button" onClick={useCurrentLocation} disabled={busy} className={action}>
+              <button type="button" onClick={request} disabled={busy} className={action}>
                 {busy ? t("nearestHome.locating") : t("nearestHome.changeLocation")}
               </button>
               <Link href="/customer/addresses" className={action}>
@@ -146,7 +122,7 @@ export function BranchBar({ context }: { context: BranchBarContext }) {
             <span className="ms-auto flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={useCurrentLocation}
+                onClick={request}
                 disabled={busy}
                 className={action}
                 data-testid="home-use-location"
@@ -173,7 +149,7 @@ export function BranchBar({ context }: { context: BranchBarContext }) {
             <span className="ms-auto flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={useCurrentLocation}
+                onClick={request}
                 disabled={busy}
                 className={action}
                 data-testid="home-retry-location"

@@ -778,8 +778,15 @@ async function main() {
         { branchId: branch.id, label: "রাত", startTime: "19:00", endTime: "23:00" },
       ],
     });
-    await prisma.branch.update({ where: { id: branch.id }, data: { openingTime: "10:00", closingTime: "23:00" } });
-    console.log("✔ Seeded delivery hours + 2 time slots");
+    // Hours are left UNSET on the seeded branch on purpose. Server-side hours
+    // enforcement (lib/services/branch-hours.ts) treats a branch with no
+    // openingTime/closingTime as always orderable, so the e2e suite — which
+    // orders from the seeded/created branches at whatever wall-clock CI runs —
+    // stays deterministic regardless of the Dhaka time of day. Tests that need a
+    // genuinely open-or-closed branch seed their own hours relative to now
+    // (see tests/e2e/57-branch-hours-enforcement.spec.ts).
+    await prisma.branch.update({ where: { id: branch.id }, data: { openingTime: null, closingTime: null } });
+    console.log("✔ Seeded 2 delivery time slots (branch hours left unset for deterministic ordering)");
   }
   if (!(await prisma.tableReservation.findFirst())) {
     const res = await prisma.tableReservation.create({

@@ -130,6 +130,8 @@ export default async function HomePage() {
         deliveryFee: branchContext.deliveryFee,
         pickupEnabled: branchContext.branch?.pickupEnabled ?? false,
         prepTimeMinutes: branchContext.branch?.prepTimeMinutes ?? null,
+        open: branchContext.open,
+        opensAt: branchContext.opensAt,
       }
     : null;
   const origin = await siteOrigin();

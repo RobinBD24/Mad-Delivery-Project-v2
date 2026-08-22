@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 
 import { Icon } from "@/components/layout/icons";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useTranslation } from "@/lib/i18n/use-translation";
-import { parseFieldErrors } from "@/lib/validation/contract";
+import { useLocationRequest } from "@/lib/hooks/use-location-request";
 
 export interface LocationStatus {
   lat: number | null;
@@ -17,78 +16,27 @@ export interface LocationStatus {
   updatedAt: string | null;
 }
 
-// Above this (metres) we still save the fix but warn the customer it is coarse
-// and offer a retry for a tighter one (req #12 low-accuracy handling).
-const LOW_ACCURACY_M = 100;
-
-type Phase =
-  | "idle"
-  | "requesting"
-  | "saving"
-  | "saved"
-  | "lowaccuracy"
-  | "denied"
-  | "unavailable"
-  | "timeout"
-  | "unsupported"
-  | "error";
-
 /**
  * Customer GPS permission + status card. Automatically requests live location
  * on mount (with browser permission) or via button, saves to /api/customer/location,
- * and refreshes the page to instantly activate nearby branches.
+ * and refreshes the page to instantly activate nearby branches. The request +
+ * save + refresh sequence is the shared `useLocationRequest` hook (§22 — one
+ * live-location implementation); this component only renders the status/wording.
  */
 export function LocationPermissionCard({ initial }: { initial: LocationStatus }) {
-  const router = useRouter();
   const { t, fmt } = useTranslation();
   const [status, setStatus] = useState<LocationStatus>(initial);
-  const [phase, setPhase] = useState<Phase>(initial.lat != null ? "saved" : "idle");
-  const [saveError, setSaveError] = useState<string | null>(null);
   const autoRequested = useRef(false);
+  const { request, phase, busy, saveError } = useLocationRequest({
+    onSaved: (fix) =>
+      setStatus({ lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy, updatedAt: new Date().toISOString() }),
+  });
 
   const hasLocation = status.lat != null && status.lng != null;
-  const busy = phase === "requesting" || phase === "saving";
-
-  function request() {
-    setSaveError(null);
-    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
-      setPhase("unsupported");
-      return;
-    }
-    setPhase("requesting");
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        setPhase("saving");
-        try {
-          const res = await fetch("/api/customer/location", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ lat: latitude, lng: longitude, accuracy, captured_at: pos.timestamp }),
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => null);
-            setSaveError(parseFieldErrors(body, t("location.errSave")).formError);
-            setPhase("error");
-            return;
-          }
-          setStatus({ lat: latitude, lng: longitude, accuracy, updatedAt: new Date().toISOString() });
-          setPhase(accuracy != null && accuracy > LOW_ACCURACY_M ? "lowaccuracy" : "saved");
-          router.refresh();
-        } catch {
-          setSaveError(t("location.errSave"));
-          setPhase("error");
-        }
-      },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) setPhase("denied");
-        else if (err.code === err.POSITION_UNAVAILABLE) setPhase("unavailable");
-        else if (err.code === err.TIMEOUT) setPhase("timeout");
-        else setPhase("error");
-      },
-      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
-    );
-  }
+  // Preserve the original mount behavior: with a location already on file, show
+  // the success state immediately (the hook starts "idle"); a fresh save moves
+  // the phase to "saved" itself.
+  const showSaved = phase === "saved" || (phase === "idle" && hasLocation);
 
   // Automatically request location when customer lands if not yet set
   useEffect(() => {
@@ -96,6 +44,7 @@ export function LocationPermissionCard({ initial }: { initial: LocationStatus })
       autoRequested.current = true;
       request();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.lat, initial.lng]);
 
   // Map the terminal error phases to a translated message + tone.
@@ -157,7 +106,7 @@ export function LocationPermissionCard({ initial }: { initial: LocationStatus })
           )}
         </div>
 
-        {phase === "saved" ? <Alert tone="success" message={t("location.savedOk")} /> : null}
+        {showSaved ? <Alert tone="success" message={t("location.savedOk")} /> : null}
         {problem ? <Alert tone={problem.tone} message={problem.message} /> : null}
 
         <div className="flex items-center gap-3">

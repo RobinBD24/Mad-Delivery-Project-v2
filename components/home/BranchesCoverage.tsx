@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { PublicHomeBranch } from "@/lib/selectors";
 import { useTranslation } from "@/lib/i18n/use-translation";
+import { branchOpenStatus, parseMinutes, type BranchOpenStatus } from "@/lib/services/branch-hours";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,29 +18,13 @@ import { cn } from "@/lib/utils";
  */
 type Branch = PublicHomeBranch;
 
-/** Parse a stored "HH:MM" into minutes-since-midnight; null when unset/invalid. */
-function parseMinutes(value: string | null): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec((value ?? "").trim());
-  if (!m) return null;
-  const h = Number(m[1]);
-  const min = Number(m[2]);
-  if (h > 23 || min > 59) return null;
-  return h * 60 + min;
-}
-/** Cheez! carries the late-night delivery window (brand-driven, not name-driven). */
-function isLateNight(brandType: string): boolean {
-  return brandType === "cheez" || brandType === "combined";
-}
-
-type StatusKey = "open" | "last-orders" | "delivery-only" | "closed";
-
 interface LiveStatus {
-  status: StatusKey;
+  status: BranchOpenStatus;
   label: string;
   sub: string;
 }
 
-const STATUS_TONES: Record<StatusKey, { dot: string; bg: string; border: string; text: string }> = {
+const STATUS_TONES: Record<BranchOpenStatus, { dot: string; bg: string; border: string; text: string }> = {
   open: { dot: "#22c55e", bg: "rgba(34,197,94,0.10)", border: "rgba(34,197,94,0.30)", text: "#22c55e" },
   "last-orders": { dot: "#f59e0b", bg: "rgba(245,158,11,0.10)", border: "rgba(245,158,11,0.30)", text: "#f59e0b" },
   "delivery-only": { dot: "#818cf8", bg: "rgba(129,140,248,0.10)", border: "rgba(129,140,248,0.30)", text: "#818cf8" },
@@ -53,44 +38,51 @@ function formatTime(minutes: number): string {
   return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""} ${ampm}`;
 }
 
-/** Port of the reference design's live branch status logic. */
+/**
+ * Display wrapper around the shared `branchOpenStatus` decision. The 4-state
+ * status now comes from ONE implementation (also used by server enforcement);
+ * this only maps that status — plus the coarse time-of-day window — to the
+ * homepage's labels/sub-text. Reads the browser's local clock, as before: this
+ * chip is display-only and is NOT the authority for whether an order is allowed.
+ */
 function liveStatus(
   branch: Branch,
   now: Date,
   t: (key: string, vars?: Record<string, string | number>) => string,
 ): LiveStatus {
-  if (!branch.isActive) {
-    return { status: "closed", label: t("home.branches.status.permanentlyClosed"), sub: "" };
-  }
   const minutes = now.getHours() * 60 + now.getMinutes();
-  const late = isLateNight(branch.brandType);
+  const status = branchOpenStatus(branch, minutes);
   const open = parseMinutes(branch.openingTime) ?? 660; // 11:00 AM default
   const close = parseMinutes(branch.closingTime) ?? 1380; // 11:00 PM default
   const lastEntry = Math.max(open, close - 30);
-  const cheezLast = 225; // 3:45 AM
-  const cheezWarn = 195; // 3:15 AM
 
-  if (minutes < 240) {
-    if (!late) return { status: "closed", label: t("home.branches.status.closed"), sub: t("home.branches.status.opens", { time: formatTime(open) }) };
-    if (minutes >= cheezLast) return { status: "closed", label: t("home.branches.status.closed"), sub: t("home.branches.status.opens", { time: formatTime(open) }) };
-    if (minutes >= cheezWarn) return { status: "last-orders", label: t("home.branches.status.lastOrders"), sub: t("home.branches.status.cheezLastOrder") };
-    return { status: "delivery-only", label: t("home.branches.status.cheezDelivery"), sub: t("home.branches.status.deliveryUntil") };
+  if (status === "open") {
+    return { status, label: t("home.branches.status.openNow"), sub: t("home.branches.status.diningDelivery") };
   }
-  if (minutes < open) {
-    if (open - minutes <= 30) return { status: "closed", label: t("home.branches.status.openingSoon"), sub: t("home.branches.status.opensAt", { time: formatTime(open) }) };
-    return { status: "closed", label: t("home.branches.status.closed"), sub: t("home.branches.status.opens", { time: formatTime(open) }) };
-  }
-  if (minutes < lastEntry) {
-    if (minutes >= lastEntry - 30) return { status: "last-orders", label: t("home.branches.status.lastOrders"), sub: t("home.branches.status.lastEntry") };
+  if (status === "delivery-only") {
     return {
-      status: "open",
-      label: t("home.branches.status.openNow"),
-      sub: t("home.branches.status.diningDelivery"),
+      status,
+      label: minutes < 240 ? t("home.branches.status.cheezDelivery") : t("home.branches.status.deliveryOnly"),
+      sub: t("home.branches.status.deliveryUntil"),
     };
   }
-  if (minutes < close) return { status: "last-orders", label: t("home.branches.status.lastOrders"), sub: t("home.branches.status.closesAt") };
-  if (late) return { status: "delivery-only", label: t("home.branches.status.deliveryOnly"), sub: t("home.branches.status.deliveryUntil") };
-  return { status: "closed", label: t("home.branches.status.closed"), sub: t("home.branches.status.opens", { time: formatTime(open) }) };
+  if (status === "last-orders") {
+    const sub =
+      minutes < 240
+        ? t("home.branches.status.cheezLastOrder")
+        : minutes < lastEntry
+          ? t("home.branches.status.lastEntry")
+          : t("home.branches.status.closesAt");
+    return { status, label: t("home.branches.status.lastOrders"), sub };
+  }
+  // status === "closed"
+  if (!branch.isActive) {
+    return { status, label: t("home.branches.status.permanentlyClosed"), sub: "" };
+  }
+  if (minutes >= 240 && minutes < open && open - minutes <= 30) {
+    return { status, label: t("home.branches.status.openingSoon"), sub: t("home.branches.status.opensAt", { time: formatTime(open) }) };
+  }
+  return { status, label: t("home.branches.status.closed"), sub: t("home.branches.status.opens", { time: formatTime(open) }) };
 }
 
 function StatusChip({ live }: { live: LiveStatus }) {

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { validationError, sk } from "@/lib/http/errors";
 import { haversineKm, isValidLatLng, roundKm, type LatLng } from "@/lib/services/geo";
 import { coverageFor } from "@/lib/services/delivery";
+import { isBranchOpenNow } from "@/lib/services/branch-hours";
 
 /**
  * Save a customer's latest validated GPS fix (req #21). Kept SEPARATE from saved
@@ -150,6 +151,10 @@ export interface BranchEligibility {
   distance_km: number | null;
   eligible: boolean;
   covered: boolean;
+  /** Whether the branch can take an order RIGHT NOW (active + within hours). */
+  open_now: boolean;
+  /** The branch's opening time ("HH:MM") for the "Opens at …" note; null when unset. */
+  opens_at: string | null;
   is_nearest?: boolean;
 }
 
@@ -203,6 +208,8 @@ export async function nearestEligibleBranch(userId: number): Promise<{
   pointSource: PointSource | null;
   nearest: BranchEligibility | null;
   branches: BranchEligibility[];
+  /** True when covered branches exist but every one of them is closed right now. */
+  allCoveredClosed: boolean;
 }> {
   const point = await trustedCustomerPointDetailed(userId);
   const branches = await prisma.branch.findMany({
@@ -212,8 +219,11 @@ export async function nearestEligibleBranch(userId: number): Promise<{
 
   const results: (BranchEligibility & { _dist: number | null })[] = [];
   for (const b of branches) {
+    // Open-now is independent of the customer's location, so compute it even for
+    // branches we can't distance-rank (no point / no branch coords).
+    const hours = isBranchOpenNow(b);
     if (!point || b.latitude == null || b.longitude == null) {
-      results.push({ id: b.id, name: b.name, distance_km: null, eligible: false, covered: false, is_nearest: false, _dist: null });
+      results.push({ id: b.id, name: b.name, distance_km: null, eligible: false, covered: false, open_now: hours.orderable, opens_at: hours.opensAt, is_nearest: false, _dist: null });
       continue;
     }
     const zones = await prisma.branchDeliveryZone.findMany({ where: { branchId: b.id, isActive: true } });
@@ -225,22 +235,31 @@ export async function nearestEligibleBranch(userId: number): Promise<{
       distance_km: roundKm(dist),
       eligible: cov.covered,
       covered: cov.covered,
+      open_now: hours.orderable,
+      opens_at: hours.opensAt,
       is_nearest: false,
       _dist: dist,
     });
   }
 
-  // Nearest among covered branches
+  // Primary branch = nearest branch that is BOTH covered and open now. When every
+  // covered branch is closed we still surface the nearest COVERED one as primary
+  // (so the UI has a branch to show with "Opens at …"); coverage — not hours —
+  // defines "out of zone", so a covered-but-closed area is not out of zone.
   const covered = results
     .filter((r) => r.covered && r._dist != null)
     .sort((a, b) => a._dist! - b._dist! || a.id - b.id);
-  const nearestId = covered[0]?.id ?? null;
+  const coveredOpen = covered.filter((r) => r.open_now);
+  const nearestId = (coveredOpen[0] ?? covered[0])?.id ?? null;
+  const allCoveredClosed = covered.length > 0 && coveredOpen.length === 0;
   const branchesOut: BranchEligibility[] = results.map((r) => ({
     id: r.id,
     name: r.name,
     distance_km: r.distance_km,
     covered: r.covered,
     eligible: r.covered,
+    open_now: r.open_now,
+    opens_at: r.opens_at,
     is_nearest: r.id === nearestId,
   }));
   return {
@@ -248,5 +267,6 @@ export async function nearestEligibleBranch(userId: number): Promise<{
     pointSource: point?.source ?? null,
     nearest: branchesOut.find((r) => r.id === nearestId) ?? null,
     branches: branchesOut,
+    allCoveredClosed,
   };
 }
